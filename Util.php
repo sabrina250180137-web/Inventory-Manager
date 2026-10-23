@@ -1,76 +1,73 @@
 <?php
-namespace Hamcrest;
 
-/*
- Copyright (c) 2012 hamcrest.org
- */
+namespace Illuminate\Container;
+
+use Closure;
+use ReflectionNamedType;
 
 /**
- * Contains utility methods for handling Hamcrest matchers.
- *
- * @see Hamcrest\Matcher
+ * @internal
  */
 class Util
 {
-    public static function registerGlobalFunctions(): void
+    /**
+     * If the given value is not an array and not null, wrap it in one.
+     *
+     * From Arr::wrap() in Illuminate\Support.
+     *
+     * @param  mixed  $value
+     * @return array
+     */
+    public static function arrayWrap($value)
     {
-        require_once __DIR__.'/../Hamcrest.php';
+        if (is_null($value)) {
+            return [];
+        }
+
+        return is_array($value) ? $value : [$value];
     }
 
     /**
-     * Wraps the item with an IsEqual matcher if it isn't a matcher already.
+     * Return the default value of the given value.
      *
-     * @param mixed $item matcher or any value
-     * @return \Hamcrest\Matcher
+     * From global value() helper in Illuminate\Support.
+     *
+     * @param  mixed  $value
+     * @return mixed
      */
-    public static function wrapValueWithIsEqual($item)
+    public static function unwrapIfClosure($value)
     {
-        return ($item instanceof Matcher)
-            ? $item
-            : Core\IsEqual::equalTo($item)
-            ;
+        return $value instanceof Closure ? $value() : $value;
     }
 
     /**
-     * Throws an exception if any item in $matchers is not a Hamcrest\Matcher.
+     * Get the class name of the given parameter's type, if possible.
      *
-     * @param array<mixed> $matchers expected to contain only matchers
-     * @throws \InvalidArgumentException if any item is not a matcher
+     * From Reflector::getParameterClassName() in Illuminate\Support.
+     *
+     * @param  \ReflectionParameter  $parameter
+     * @return string|null
      */
-    public static function checkAllAreMatchers(array $matchers): void
+    public static function getParameterClassName($parameter)
     {
-        foreach ($matchers as $m) {
-            if (!($m instanceof Matcher)) {
-                throw new \InvalidArgumentException(
-                    'Each argument or element must be a Hamcrest matcher'
-                );
+        $type = $parameter->getType();
+
+        if (! $type instanceof ReflectionNamedType || $type->isBuiltin()) {
+            return null;
+        }
+
+        $name = $type->getName();
+
+        if (! is_null($class = $parameter->getDeclaringClass())) {
+            if ($name === 'self') {
+                return $class->getName();
+            }
+
+            if ($name === 'parent' && $parent = $class->getParentClass()) {
+                return $parent->getName();
             }
         }
-    }
 
-    /**
-     * Returns a copy of $items where each non-Matcher item is replaced by
-     * a Hamcrest\Core\IsEqual matcher for the item. If the first and only item
-     * is an array, it is used as the $items array to support the old style
-     * of passing an array as the sole argument to a matcher.
-     *
-     * @param array<mixed> $items contains items and matchers
-     * @return array<Matcher> all items are
-     */
-    public static function createMatcherArray(array $items)
-    {
-        //Extract single array item
-        if (count($items) == 1 && is_array($items[0])) {
-            $items = $items[0];
-        }
-
-        //Replace non-matchers
-        foreach ($items as &$item) {
-            if (!($item instanceof Matcher)) {
-                $item = Core\IsEqual::equalTo($item);
-            }
-        }
-
-        return $items;
+        return $name;
     }
 }
