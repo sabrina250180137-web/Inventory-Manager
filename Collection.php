@@ -1,160 +1,292 @@
 <?php
 
-namespace Illuminate\Support;
+namespace Illuminate\Database\Eloquent;
 
-use ArrayAccess;
-use ArrayIterator;
-use Illuminate\Contracts\Support\CanBeEscapedWhenCastToString;
-use Illuminate\Support\Traits\EnumeratesValues;
-use Illuminate\Support\Traits\Macroable;
-use stdClass;
+use Illuminate\Contracts\Queue\QueueableCollection;
+use Illuminate\Contracts\Queue\QueueableEntity;
+use Illuminate\Contracts\Support\Arrayable;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Collection as BaseCollection;
+use Illuminate\Support\Str;
+use LogicException;
 
-class Collection implements ArrayAccess, CanBeEscapedWhenCastToString, Enumerable
+class Collection extends BaseCollection implements QueueableCollection
 {
-    use EnumeratesValues, Macroable;
-
     /**
-     * The items contained in the collection.
+     * Find a model in the collection by key.
      *
-     * @var array
+     * @param  mixed  $key
+     * @param  mixed  $default
+     * @return \Illuminate\Database\Eloquent\Model|static|null
      */
-    protected $items = [];
+    public function find($key, $default = null)
+    {
+        if ($key instanceof Model) {
+            $key = $key->getKey();
+        }
+
+        if ($key instanceof Arrayable) {
+            $key = $key->toArray();
+        }
+
+        if (is_array($key)) {
+            if ($this->isEmpty()) {
+                return new static;
+            }
+
+            return $this->whereIn($this->first()->getKeyName(), $key);
+        }
+
+        return Arr::first($this->items, function ($model) use ($key) {
+            return $model->getKey() == $key;
+        }, $default);
+    }
 
     /**
-     * Create a new collection.
+     * Load a set of relationships onto the collection.
      *
-     * @param  mixed  $items
+     * @param  array|string  $relations
+     * @return $this
+     */
+    public function load($relations)
+    {
+        if ($this->isNotEmpty()) {
+            if (is_string($relations)) {
+                $relations = func_get_args();
+            }
+
+            $query = $this->first()->newQueryWithoutRelationships()->with($relations);
+
+            $this->items = $query->eagerLoadRelations($this->items);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Load a set of aggregations over relationship's column onto the collection.
+     *
+     * @param  array|string  $relations
+     * @param  string  $column
+     * @param  string  $function
+     * @return $this
+     */
+    public function loadAggregate($relations, $column, $function = null)
+    {
+        if ($this->isEmpty()) {
+            return $this;
+        }
+
+        $models = $this->first()->newModelQuery()
+            ->whereKey($this->modelKeys())
+            ->select($this->first()->getKeyName())
+            ->withAggregate($relations, $column, $function)
+            ->get()
+            ->keyBy($this->first()->getKeyName());
+
+        $attributes = Arr::except(
+            array_keys($models->first()->getAttributes()),
+            $models->first()->getKeyName()
+        );
+
+        $this->each(function ($model) use ($models, $attributes) {
+            $extraAttributes = Arr::only($models->get($model->getKey())->getAttributes(), $attributes);
+
+            $model->forceFill($extraAttributes)
+                ->syncOriginalAttributes($attributes)
+                ->mergeCasts($models->get($model->getKey())->getCasts());
+        });
+
+        return $this;
+    }
+
+    /**
+     * Load a set of relationship counts onto the collection.
+     *
+     * @param  array|string  $relations
+     * @return $this
+     */
+    public function loadCount($relations)
+    {
+        return $this->loadAggregate($relations, '*', 'count');
+    }
+
+    /**
+     * Load a set of relationship's max column values onto the collection.
+     *
+     * @param  array|string  $relations
+     * @param  string  $column
+     * @return $this
+     */
+    public function loadMax($relations, $column)
+    {
+        return $this->loadAggregate($relations, $column, 'max');
+    }
+
+    /**
+     * Load a set of relationship's min column values onto the collection.
+     *
+     * @param  array|string  $relations
+     * @param  string  $column
+     * @return $this
+     */
+    public function loadMin($relations, $column)
+    {
+        return $this->loadAggregate($relations, $column, 'min');
+    }
+
+    /**
+     * Load a set of relationship's column summations onto the collection.
+     *
+     * @param  array|string  $relations
+     * @param  string  $column
+     * @return $this
+     */
+    public function loadSum($relations, $column)
+    {
+        return $this->loadAggregate($relations, $column, 'sum');
+    }
+
+    /**
+     * Load a set of relationship's average column values onto the collection.
+     *
+     * @param  array|string  $relations
+     * @param  string  $column
+     * @return $this
+     */
+    public function loadAvg($relations, $column)
+    {
+        return $this->loadAggregate($relations, $column, 'avg');
+    }
+
+    /**
+     * Load a set of related existences onto the collection.
+     *
+     * @param  array|string  $relations
+     * @return $this
+     */
+    public function loadExists($relations)
+    {
+        return $this->loadAggregate($relations, '*', 'exists');
+    }
+
+    /**
+     * Load a set of relationships onto the collection if they are not already eager loaded.
+     *
+     * @param  array|string  $relations
+     * @return $this
+     */
+    public function loadMissing($relations)
+    {
+        if (is_string($relations)) {
+            $relations = func_get_args();
+        }
+
+        foreach ($relations as $key => $value) {
+            if (is_numeric($key)) {
+                $key = $value;
+            }
+
+            $segments = explode('.', explode(':', $key)[0]);
+
+            if (Str::contains($key, ':')) {
+                $segments[count($segments) - 1] .= ':'.explode(':', $key)[1];
+            }
+
+            $path = [];
+
+            foreach ($segments as $segment) {
+                $path[] = [$segment => $segment];
+            }
+
+            if (is_callable($value)) {
+                $path[count($segments) - 1][end($segments)] = $value;
+            }
+
+            $this->loadMissingRelation($this, $path);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Load a relationship path if it is not already eager loaded.
+     *
+     * @param  \Illuminate\Database\Eloquent\Collection  $models
+     * @param  array  $path
      * @return void
      */
-    public function __construct($items = [])
+    protected function loadMissingRelation(self $models, array $path)
     {
-        $this->items = $this->getArrayableItems($items);
-    }
+        $relation = array_shift($path);
 
-    /**
-     * Create a collection with the given range.
-     *
-     * @param  int  $from
-     * @param  int  $to
-     * @return static
-     */
-    public static function range($from, $to)
-    {
-        return new static(range($from, $to));
-    }
+        $name = explode(':', key($relation))[0];
 
-    /**
-     * Get all of the items in the collection.
-     *
-     * @return array
-     */
-    public function all()
-    {
-        return $this->items;
-    }
-
-    /**
-     * Get a lazy collection for the items in this collection.
-     *
-     * @return \Illuminate\Support\LazyCollection
-     */
-    public function lazy()
-    {
-        return new LazyCollection($this->items);
-    }
-
-    /**
-     * Get the average value of a given key.
-     *
-     * @param  callable|string|null  $callback
-     * @return mixed
-     */
-    public function avg($callback = null)
-    {
-        $callback = $this->valueRetriever($callback);
-
-        $items = $this->map(function ($value) use ($callback) {
-            return $callback($value);
-        })->filter(function ($value) {
-            return ! is_null($value);
-        });
-
-        if ($count = $items->count()) {
-            return $items->sum() / $count;
+        if (is_string(reset($relation))) {
+            $relation = reset($relation);
         }
-    }
 
-    /**
-     * Get the median of a given key.
-     *
-     * @param  string|array|null  $key
-     * @return mixed
-     */
-    public function median($key = null)
-    {
-        $values = (isset($key) ? $this->pluck($key) : $this)
-            ->filter(function ($item) {
-                return ! is_null($item);
-            })->sort()->values();
+        $models->filter(function ($model) use ($name) {
+            return ! is_null($model) && ! $model->relationLoaded($name);
+        })->load($relation);
 
-        $count = $values->count();
-
-        if ($count === 0) {
+        if (empty($path)) {
             return;
         }
 
-        $middle = (int) ($count / 2);
+        $models = $models->pluck($name)->whereNotNull();
 
-        if ($count % 2) {
-            return $values->get($middle);
+        if ($models->first() instanceof BaseCollection) {
+            $models = $models->collapse();
         }
 
-        return (new static([
-            $values->get($middle - 1), $values->get($middle),
-        ]))->average();
+        $this->loadMissingRelation(new static($models), $path);
     }
 
     /**
-     * Get the mode of a given key.
+     * Load a set of relationships onto the mixed relationship collection.
      *
-     * @param  string|array|null  $key
-     * @return array|null
+     * @param  string  $relation
+     * @param  array  $relations
+     * @return $this
      */
-    public function mode($key = null)
+    public function loadMorph($relation, $relations)
     {
-        if ($this->count() === 0) {
-            return;
-        }
+        $this->pluck($relation)
+            ->filter()
+            ->groupBy(function ($model) {
+                return get_class($model);
+            })
+            ->each(function ($models, $className) use ($relations) {
+                static::make($models)->load($relations[$className] ?? []);
+            });
 
-        $collection = isset($key) ? $this->pluck($key) : $this;
-
-        $counts = new static;
-
-        $collection->each(function ($value) use ($counts) {
-            $counts[$value] = isset($counts[$value]) ? $counts[$value] + 1 : 1;
-        });
-
-        $sorted = $counts->sort();
-
-        $highestValue = $sorted->last();
-
-        return $sorted->filter(function ($value) use ($highestValue) {
-            return $value == $highestValue;
-        })->sort()->keys()->all();
+        return $this;
     }
 
     /**
-     * Collapse the collection of items into a single array.
+     * Load a set of relationship counts onto the mixed relationship collection.
      *
-     * @return static
+     * @param  string  $relation
+     * @param  array  $relations
+     * @return $this
      */
-    public function collapse()
+    public function loadMorphCount($relation, $relations)
     {
-        return new static(Arr::collapse($this->items));
+        $this->pluck($relation)
+            ->filter()
+            ->groupBy(function ($model) {
+                return get_class($model);
+            })
+            ->each(function ($models, $className) use ($relations) {
+                static::make($models)->loadCount($relations[$className] ?? []);
+            });
+
+        return $this;
     }
 
     /**
-     * Determine if an item exists in the collection.
+     * Determine if a key exists in the collection.
      *
      * @param  mixed  $key
      * @param  mixed  $operator
@@ -163,662 +295,174 @@ class Collection implements ArrayAccess, CanBeEscapedWhenCastToString, Enumerabl
      */
     public function contains($key, $operator = null, $value = null)
     {
-        if (func_num_args() === 1) {
-            if ($this->useAsCallable($key)) {
-                $placeholder = new stdClass;
-
-                return $this->first($key, $placeholder) !== $placeholder;
-            }
-
-            return in_array($key, $this->items);
+        if (func_num_args() > 1 || $this->useAsCallable($key)) {
+            return parent::contains(...func_get_args());
         }
 
-        return $this->contains($this->operatorForWhere(...func_get_args()));
-    }
-
-    /**
-     * Determine if an item is not contained in the collection.
-     *
-     * @param  mixed  $key
-     * @param  mixed  $operator
-     * @param  mixed  $value
-     * @return bool
-     */
-    public function doesntContain($key, $operator = null, $value = null)
-    {
-        return ! $this->contains(...func_get_args());
-    }
-
-    /**
-     * Cross join with the given lists, returning all possible permutations.
-     *
-     * @param  mixed  ...$lists
-     * @return static
-     */
-    public function crossJoin(...$lists)
-    {
-        return new static(Arr::crossJoin(
-            $this->items, ...array_map([$this, 'getArrayableItems'], $lists)
-        ));
-    }
-
-    /**
-     * Get the items in the collection that are not present in the given items.
-     *
-     * @param  mixed  $items
-     * @return static
-     */
-    public function diff($items)
-    {
-        return new static(array_diff($this->items, $this->getArrayableItems($items)));
-    }
-
-    /**
-     * Get the items in the collection that are not present in the given items, using the callback.
-     *
-     * @param  mixed  $items
-     * @param  callable  $callback
-     * @return static
-     */
-    public function diffUsing($items, callable $callback)
-    {
-        return new static(array_udiff($this->items, $this->getArrayableItems($items), $callback));
-    }
-
-    /**
-     * Get the items in the collection whose keys and values are not present in the given items.
-     *
-     * @param  mixed  $items
-     * @return static
-     */
-    public function diffAssoc($items)
-    {
-        return new static(array_diff_assoc($this->items, $this->getArrayableItems($items)));
-    }
-
-    /**
-     * Get the items in the collection whose keys and values are not present in the given items, using the callback.
-     *
-     * @param  mixed  $items
-     * @param  callable  $callback
-     * @return static
-     */
-    public function diffAssocUsing($items, callable $callback)
-    {
-        return new static(array_diff_uassoc($this->items, $this->getArrayableItems($items), $callback));
-    }
-
-    /**
-     * Get the items in the collection whose keys are not present in the given items.
-     *
-     * @param  mixed  $items
-     * @return static
-     */
-    public function diffKeys($items)
-    {
-        return new static(array_diff_key($this->items, $this->getArrayableItems($items)));
-    }
-
-    /**
-     * Get the items in the collection whose keys are not present in the given items, using the callback.
-     *
-     * @param  mixed  $items
-     * @param  callable  $callback
-     * @return static
-     */
-    public function diffKeysUsing($items, callable $callback)
-    {
-        return new static(array_diff_ukey($this->items, $this->getArrayableItems($items), $callback));
-    }
-
-    /**
-     * Retrieve duplicate items from the collection.
-     *
-     * @param  callable|string|null  $callback
-     * @param  bool  $strict
-     * @return static
-     */
-    public function duplicates($callback = null, $strict = false)
-    {
-        $items = $this->map($this->valueRetriever($callback));
-
-        $uniqueItems = $items->unique(null, $strict);
-
-        $compare = $this->duplicateComparator($strict);
-
-        $duplicates = new static;
-
-        foreach ($items as $key => $value) {
-            if ($uniqueItems->isNotEmpty() && $compare($value, $uniqueItems->first())) {
-                $uniqueItems->shift();
-            } else {
-                $duplicates[$key] = $value;
-            }
+        if ($key instanceof Model) {
+            return parent::contains(function ($model) use ($key) {
+                return $model->is($key);
+            });
         }
 
-        return $duplicates;
+        return parent::contains(function ($model) use ($key) {
+            return $model->getKey() == $key;
+        });
     }
 
     /**
-     * Retrieve duplicate items from the collection using strict comparison.
+     * Get the array of primary keys.
      *
-     * @param  callable|string|null  $callback
+     * @return array
+     */
+    public function modelKeys()
+    {
+        return array_map(function ($model) {
+            return $model->getKey();
+        }, $this->items);
+    }
+
+    /**
+     * Merge the collection with the given items.
+     *
+     * @param  \ArrayAccess|array  $items
      * @return static
      */
-    public function duplicatesStrict($callback = null)
+    public function merge($items)
     {
-        return $this->duplicates($callback, true);
-    }
+        $dictionary = $this->getDictionary();
 
-    /**
-     * Get the comparison function to detect duplicates.
-     *
-     * @param  bool  $strict
-     * @return \Closure
-     */
-    protected function duplicateComparator($strict)
-    {
-        if ($strict) {
-            return function ($a, $b) {
-                return $a === $b;
-            };
+        foreach ($items as $item) {
+            $dictionary[$item->getKey()] = $item;
         }
 
-        return function ($a, $b) {
-            return $a == $b;
-        };
-    }
-
-    /**
-     * Get all items except for those with the specified keys.
-     *
-     * @param  \Illuminate\Support\Collection|mixed  $keys
-     * @return static
-     */
-    public function except($keys)
-    {
-        if ($keys instanceof Enumerable) {
-            $keys = $keys->all();
-        } elseif (! is_array($keys)) {
-            $keys = func_get_args();
-        }
-
-        return new static(Arr::except($this->items, $keys));
-    }
-
-    /**
-     * Run a filter over each of the items.
-     *
-     * @param  callable|null  $callback
-     * @return static
-     */
-    public function filter(callable $callback = null)
-    {
-        if ($callback) {
-            return new static(Arr::where($this->items, $callback));
-        }
-
-        return new static(array_filter($this->items));
-    }
-
-    /**
-     * Get the first item from the collection passing the given truth test.
-     *
-     * @param  callable|null  $callback
-     * @param  mixed  $default
-     * @return mixed
-     */
-    public function first(callable $callback = null, $default = null)
-    {
-        return Arr::first($this->items, $callback, $default);
-    }
-
-    /**
-     * Get a flattened array of the items in the collection.
-     *
-     * @param  int  $depth
-     * @return static
-     */
-    public function flatten($depth = INF)
-    {
-        return new static(Arr::flatten($this->items, $depth));
-    }
-
-    /**
-     * Flip the items in the collection.
-     *
-     * @return static
-     */
-    public function flip()
-    {
-        return new static(array_flip($this->items));
-    }
-
-    /**
-     * Remove an item from the collection by key.
-     *
-     * @param  string|int|array  $keys
-     * @return $this
-     */
-    public function forget($keys)
-    {
-        foreach ((array) $keys as $key) {
-            $this->offsetUnset($key);
-        }
-
-        return $this;
-    }
-
-    /**
-     * Get an item from the collection by key.
-     *
-     * @param  mixed  $key
-     * @param  mixed  $default
-     * @return mixed
-     */
-    public function get($key, $default = null)
-    {
-        if (array_key_exists($key, $this->items)) {
-            return $this->items[$key];
-        }
-
-        return value($default);
-    }
-
-    /**
-     * Get an item from the collection by key or add it to collection if it does not exist.
-     *
-     * @param  mixed  $key
-     * @param  mixed  $value
-     * @return mixed
-     */
-    public function getOrPut($key, $value)
-    {
-        if (array_key_exists($key, $this->items)) {
-            return $this->items[$key];
-        }
-
-        $this->offsetSet($key, $value = value($value));
-
-        return $value;
-    }
-
-    /**
-     * Group an associative array by a field or using a callback.
-     *
-     * @param  array|callable|string  $groupBy
-     * @param  bool  $preserveKeys
-     * @return static
-     */
-    public function groupBy($groupBy, $preserveKeys = false)
-    {
-        if (! $this->useAsCallable($groupBy) && is_array($groupBy)) {
-            $nextGroups = $groupBy;
-
-            $groupBy = array_shift($nextGroups);
-        }
-
-        $groupBy = $this->valueRetriever($groupBy);
-
-        $results = [];
-
-        foreach ($this->items as $key => $value) {
-            $groupKeys = $groupBy($value, $key);
-
-            if (! is_array($groupKeys)) {
-                $groupKeys = [$groupKeys];
-            }
-
-            foreach ($groupKeys as $groupKey) {
-                $groupKey = is_bool($groupKey) ? (int) $groupKey : $groupKey;
-
-                if (! array_key_exists($groupKey, $results)) {
-                    $results[$groupKey] = new static;
-                }
-
-                $results[$groupKey]->offsetSet($preserveKeys ? $key : null, $value);
-            }
-        }
-
-        $result = new static($results);
-
-        if (! empty($nextGroups)) {
-            return $result->map->groupBy($nextGroups, $preserveKeys);
-        }
-
-        return $result;
-    }
-
-    /**
-     * Key an associative array by a field or using a callback.
-     *
-     * @param  callable|string  $keyBy
-     * @return static
-     */
-    public function keyBy($keyBy)
-    {
-        $keyBy = $this->valueRetriever($keyBy);
-
-        $results = [];
-
-        foreach ($this->items as $key => $item) {
-            $resolvedKey = $keyBy($item, $key);
-
-            if (is_object($resolvedKey)) {
-                $resolvedKey = (string) $resolvedKey;
-            }
-
-            $results[$resolvedKey] = $item;
-        }
-
-        return new static($results);
-    }
-
-    /**
-     * Determine if an item exists in the collection by key.
-     *
-     * @param  mixed  $key
-     * @return bool
-     */
-    public function has($key)
-    {
-        $keys = is_array($key) ? $key : func_get_args();
-
-        foreach ($keys as $value) {
-            if (! array_key_exists($value, $this->items)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Determine if any of the keys exist in the collection.
-     *
-     * @param  mixed  $key
-     * @return bool
-     */
-    public function hasAny($key)
-    {
-        if ($this->isEmpty()) {
-            return false;
-        }
-
-        $keys = is_array($key) ? $key : func_get_args();
-
-        foreach ($keys as $value) {
-            if ($this->has($value)) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Concatenate values of a given key as a string.
-     *
-     * @param  string  $value
-     * @param  string|null  $glue
-     * @return string
-     */
-    public function implode($value, $glue = null)
-    {
-        $first = $this->first();
-
-        if (is_array($first) || (is_object($first) && ! $first instanceof Stringable)) {
-            return implode($glue ?? '', $this->pluck($value)->all());
-        }
-
-        return implode($value ?? '', $this->items);
-    }
-
-    /**
-     * Intersect the collection with the given items.
-     *
-     * @param  mixed  $items
-     * @return static
-     */
-    public function intersect($items)
-    {
-        return new static(array_intersect($this->items, $this->getArrayableItems($items)));
-    }
-
-    /**
-     * Intersect the collection with the given items by key.
-     *
-     * @param  mixed  $items
-     * @return static
-     */
-    public function intersectByKeys($items)
-    {
-        return new static(array_intersect_key(
-            $this->items, $this->getArrayableItems($items)
-        ));
-    }
-
-    /**
-     * Determine if the collection is empty or not.
-     *
-     * @return bool
-     */
-    public function isEmpty()
-    {
-        return empty($this->items);
-    }
-
-    /**
-     * Determine if the collection contains a single item.
-     *
-     * @return bool
-     */
-    public function containsOneItem()
-    {
-        return $this->count() === 1;
-    }
-
-    /**
-     * Join all items from the collection using a string. The final items can use a separate glue string.
-     *
-     * @param  string  $glue
-     * @param  string  $finalGlue
-     * @return string
-     */
-    public function join($glue, $finalGlue = '')
-    {
-        if ($finalGlue === '') {
-            return $this->implode($glue);
-        }
-
-        $count = $this->count();
-
-        if ($count === 0) {
-            return '';
-        }
-
-        if ($count === 1) {
-            return $this->last();
-        }
-
-        $collection = new static($this->items);
-
-        $finalItem = $collection->pop();
-
-        return $collection->implode($glue).$finalGlue.$finalItem;
-    }
-
-    /**
-     * Get the keys of the collection items.
-     *
-     * @return static
-     */
-    public function keys()
-    {
-        return new static(array_keys($this->items));
-    }
-
-    /**
-     * Get the last item from the collection.
-     *
-     * @param  callable|null  $callback
-     * @param  mixed  $default
-     * @return mixed
-     */
-    public function last(callable $callback = null, $default = null)
-    {
-        return Arr::last($this->items, $callback, $default);
-    }
-
-    /**
-     * Get the values of a given key.
-     *
-     * @param  string|array|int|null  $value
-     * @param  string|null  $key
-     * @return static
-     */
-    public function pluck($value, $key = null)
-    {
-        return new static(Arr::pluck($this->items, $value, $key));
+        return new static(array_values($dictionary));
     }
 
     /**
      * Run a map over each of the items.
      *
      * @param  callable  $callback
-     * @return static
+     * @return \Illuminate\Support\Collection|static
      */
     public function map(callable $callback)
     {
-        $keys = array_keys($this->items);
+        $result = parent::map($callback);
 
-        $items = array_map($callback, $this->items, $keys);
-
-        return new static(array_combine($keys, $items));
-    }
-
-    /**
-     * Run a dictionary map over the items.
-     *
-     * The callback should return an associative array with a single key/value pair.
-     *
-     * @param  callable  $callback
-     * @return static
-     */
-    public function mapToDictionary(callable $callback)
-    {
-        $dictionary = [];
-
-        foreach ($this->items as $key => $item) {
-            $pair = $callback($item, $key);
-
-            $key = key($pair);
-
-            $value = reset($pair);
-
-            if (! isset($dictionary[$key])) {
-                $dictionary[$key] = [];
-            }
-
-            $dictionary[$key][] = $value;
-        }
-
-        return new static($dictionary);
+        return $result->contains(function ($item) {
+            return ! $item instanceof Model;
+        }) ? $result->toBase() : $result;
     }
 
     /**
      * Run an associative map over each of the items.
      *
-     * The callback should return an associative array with a single key/value pair.
+     * The callback should return an associative array with a single key / value pair.
      *
      * @param  callable  $callback
-     * @return static
+     * @return \Illuminate\Support\Collection|static
      */
     public function mapWithKeys(callable $callback)
     {
-        $result = [];
+        $result = parent::mapWithKeys($callback);
 
-        foreach ($this->items as $key => $value) {
-            $assoc = $callback($value, $key);
+        return $result->contains(function ($item) {
+            return ! $item instanceof Model;
+        }) ? $result->toBase() : $result;
+    }
 
-            foreach ($assoc as $mapKey => $mapValue) {
-                $result[$mapKey] = $mapValue;
+    /**
+     * Reload a fresh model instance from the database for all the entities.
+     *
+     * @param  array|string  $with
+     * @return static
+     */
+    public function fresh($with = [])
+    {
+        if ($this->isEmpty()) {
+            return new static;
+        }
+
+        $model = $this->first();
+
+        $freshModels = $model->newQueryWithoutScopes()
+            ->with(is_string($with) ? func_get_args() : $with)
+            ->whereIn($model->getKeyName(), $this->modelKeys())
+            ->get()
+            ->getDictionary();
+
+        return $this->filter(function ($model) use ($freshModels) {
+            return $model->exists && isset($freshModels[$model->getKey()]);
+        })
+        ->map(function ($model) use ($freshModels) {
+            return $freshModels[$model->getKey()];
+        });
+    }
+
+    /**
+     * Diff the collection with the given items.
+     *
+     * @param  \ArrayAccess|array  $items
+     * @return static
+     */
+    public function diff($items)
+    {
+        $diff = new static;
+
+        $dictionary = $this->getDictionary($items);
+
+        foreach ($this->items as $item) {
+            if (! isset($dictionary[$item->getKey()])) {
+                $diff->add($item);
             }
         }
 
-        return new static($result);
+        return $diff;
     }
 
     /**
-     * Merge the collection with the given items.
+     * Intersect the collection with the given items.
      *
-     * @param  mixed  $items
+     * @param  \ArrayAccess|array  $items
      * @return static
      */
-    public function merge($items)
+    public function intersect($items)
     {
-        return new static(array_merge($this->items, $this->getArrayableItems($items)));
-    }
+        $intersect = new static;
 
-    /**
-     * Recursively merge the collection with the given items.
-     *
-     * @param  mixed  $items
-     * @return static
-     */
-    public function mergeRecursive($items)
-    {
-        return new static(array_merge_recursive($this->items, $this->getArrayableItems($items)));
-    }
-
-    /**
-     * Create a collection by using this collection for keys and another for its values.
-     *
-     * @param  mixed  $values
-     * @return static
-     */
-    public function combine($values)
-    {
-        return new static(array_combine($this->all(), $this->getArrayableItems($values)));
-    }
-
-    /**
-     * Union the collection with the given items.
-     *
-     * @param  mixed  $items
-     * @return static
-     */
-    public function union($items)
-    {
-        return new static($this->items + $this->getArrayableItems($items));
-    }
-
-    /**
-     * Create a new collection consisting of every n-th element.
-     *
-     * @param  int  $step
-     * @param  int  $offset
-     * @return static
-     */
-    public function nth($step, $offset = 0)
-    {
-        $new = [];
-
-        $position = 0;
-
-        foreach ($this->slice($offset)->items as $item) {
-            if ($position % $step === 0) {
-                $new[] = $item;
-            }
-
-            $position++;
+        if (empty($items)) {
+            return $intersect;
         }
 
-        return new static($new);
+        $dictionary = $this->getDictionary($items);
+
+        foreach ($this->items as $item) {
+            if (isset($dictionary[$item->getKey()])) {
+                $intersect->add($item);
+            }
+        }
+
+        return $intersect;
     }
 
     /**
-     * Get the items with the specified keys.
+     * Return only unique items from the collection.
+     *
+     * @param  string|callable|null  $key
+     * @param  bool  $strict
+     * @return static
+     */
+    public function unique($key = null, $strict = false)
+    {
+        if (! is_null($key)) {
+            return parent::unique($key, $strict);
+        }
+
+        return new static(array_values($this->getDictionary()));
+    }
+
+    /**
+     * Returns only the models from the collection with the specified keys.
      *
      * @param  mixed  $keys
      * @return static
@@ -829,724 +473,142 @@ class Collection implements ArrayAccess, CanBeEscapedWhenCastToString, Enumerabl
             return new static($this->items);
         }
 
-        if ($keys instanceof Enumerable) {
-            $keys = $keys->all();
-        }
+        $dictionary = Arr::only($this->getDictionary(), $keys);
 
-        $keys = is_array($keys) ? $keys : func_get_args();
-
-        return new static(Arr::only($this->items, $keys));
+        return new static(array_values($dictionary));
     }
 
     /**
-     * Get and remove the last N items from the collection.
+     * Returns all models in the collection except the models with specified keys.
      *
-     * @param  int  $count
-     * @return mixed
+     * @param  mixed  $keys
+     * @return static
      */
-    public function pop($count = 1)
+    public function except($keys)
     {
-        if ($count === 1) {
-            return array_pop($this->items);
-        }
+        $dictionary = Arr::except($this->getDictionary(), $keys);
 
-        if ($this->isEmpty()) {
-            return new static;
-        }
-
-        $results = [];
-
-        $collectionCount = $this->count();
-
-        foreach (range(1, min($count, $collectionCount)) as $item) {
-            array_push($results, array_pop($this->items));
-        }
-
-        return new static($results);
+        return new static(array_values($dictionary));
     }
 
     /**
-     * Push an item onto the beginning of the collection.
+     * Make the given, typically visible, attributes hidden across the entire collection.
      *
-     * @param  mixed  $value
-     * @param  mixed  $key
+     * @param  array|string  $attributes
      * @return $this
      */
-    public function prepend($value, $key = null)
+    public function makeHidden($attributes)
     {
-        $this->items = Arr::prepend($this->items, ...func_get_args());
-
-        return $this;
+        return $this->each->makeHidden($attributes);
     }
 
     /**
-     * Push one or more items onto the end of the collection.
+     * Make the given, typically hidden, attributes visible across the entire collection.
      *
-     * @param  mixed  $values
+     * @param  array|string  $attributes
      * @return $this
      */
-    public function push(...$values)
+    public function makeVisible($attributes)
     {
-        foreach ($values as $value) {
-            $this->items[] = $value;
-        }
-
-        return $this;
+        return $this->each->makeVisible($attributes);
     }
 
     /**
-     * Push all of the given items onto the collection.
+     * Append an attribute across the entire collection.
      *
-     * @param  iterable  $source
-     * @return static
-     */
-    public function concat($source)
-    {
-        $result = new static($this);
-
-        foreach ($source as $item) {
-            $result->push($item);
-        }
-
-        return $result;
-    }
-
-    /**
-     * Get and remove an item from the collection.
-     *
-     * @param  mixed  $key
-     * @param  mixed  $default
-     * @return mixed
-     */
-    public function pull($key, $default = null)
-    {
-        return Arr::pull($this->items, $key, $default);
-    }
-
-    /**
-     * Put an item in the collection by key.
-     *
-     * @param  mixed  $key
-     * @param  mixed  $value
+     * @param  array|string  $attributes
      * @return $this
      */
-    public function put($key, $value)
+    public function append($attributes)
     {
-        $this->offsetSet($key, $value);
-
-        return $this;
+        return $this->each->append($attributes);
     }
 
     /**
-     * Get one or a specified number of items randomly from the collection.
+     * Get a dictionary keyed by primary keys.
      *
-     * @param  int|null  $number
-     * @return static|mixed
-     *
-     * @throws \InvalidArgumentException
+     * @param  \ArrayAccess|array|null  $items
+     * @return array
      */
-    public function random($number = null)
+    public function getDictionary($items = null)
     {
-        if (is_null($number)) {
-            return Arr::random($this->items);
+        $items = is_null($items) ? $this->items : $items;
+
+        $dictionary = [];
+
+        foreach ($items as $value) {
+            $dictionary[$value->getKey()] = $value;
         }
 
-        return new static(Arr::random($this->items, $number));
+        return $dictionary;
     }
 
     /**
-     * Replace the collection items with the given items.
-     *
-     * @param  mixed  $items
-     * @return static
+     * The following methods are intercepted to always return base collections.
      */
-    public function replace($items)
+
+    /**
+     * Get an array with the values of a given key.
+     *
+     * @param  string|array  $value
+     * @param  string|null  $key
+     * @return \Illuminate\Support\Collection
+     */
+    public function pluck($value, $key = null)
     {
-        return new static(array_replace($this->items, $this->getArrayableItems($items)));
+        return $this->toBase()->pluck($value, $key);
     }
 
     /**
-     * Recursively replace the collection items with the given items.
+     * Get the keys of the collection items.
      *
-     * @param  mixed  $items
-     * @return static
+     * @return \Illuminate\Support\Collection
      */
-    public function replaceRecursive($items)
+    public function keys()
     {
-        return new static(array_replace_recursive($this->items, $this->getArrayableItems($items)));
-    }
-
-    /**
-     * Reverse items order.
-     *
-     * @return static
-     */
-    public function reverse()
-    {
-        return new static(array_reverse($this->items, true));
-    }
-
-    /**
-     * Search the collection for a given value and return the corresponding key if successful.
-     *
-     * @param  mixed  $value
-     * @param  bool  $strict
-     * @return mixed
-     */
-    public function search($value, $strict = false)
-    {
-        if (! $this->useAsCallable($value)) {
-            return array_search($value, $this->items, $strict);
-        }
-
-        foreach ($this->items as $key => $item) {
-            if ($value($item, $key)) {
-                return $key;
-            }
-        }
-
-        return false;
-    }
-
-    /**
-     * Get and remove the first N items from the collection.
-     *
-     * @param  int  $count
-     * @return mixed
-     */
-    public function shift($count = 1)
-    {
-        if ($count === 1) {
-            return array_shift($this->items);
-        }
-
-        if ($this->isEmpty()) {
-            return new static;
-        }
-
-        $results = [];
-
-        $collectionCount = $this->count();
-
-        foreach (range(1, min($count, $collectionCount)) as $item) {
-            array_push($results, array_shift($this->items));
-        }
-
-        return new static($results);
-    }
-
-    /**
-     * Shuffle the items in the collection.
-     *
-     * @param  int|null  $seed
-     * @return static
-     */
-    public function shuffle($seed = null)
-    {
-        return new static(Arr::shuffle($this->items, $seed));
-    }
-
-    /**
-     * Create chunks representing a "sliding window" view of the items in the collection.
-     *
-     * @param  int  $size
-     * @param  int  $step
-     * @return static
-     */
-    public function sliding($size = 2, $step = 1)
-    {
-        $chunks = floor(($this->count() - $size) / $step) + 1;
-
-        return static::times($chunks, function ($number) use ($size, $step) {
-            return $this->slice(($number - 1) * $step, $size);
-        });
-    }
-
-    /**
-     * Skip the first {$count} items.
-     *
-     * @param  int  $count
-     * @return static
-     */
-    public function skip($count)
-    {
-        return $this->slice($count);
-    }
-
-    /**
-     * Skip items in the collection until the given condition is met.
-     *
-     * @param  mixed  $value
-     * @return static
-     */
-    public function skipUntil($value)
-    {
-        return new static($this->lazy()->skipUntil($value)->all());
-    }
-
-    /**
-     * Skip items in the collection while the given condition is met.
-     *
-     * @param  mixed  $value
-     * @return static
-     */
-    public function skipWhile($value)
-    {
-        return new static($this->lazy()->skipWhile($value)->all());
-    }
-
-    /**
-     * Slice the underlying collection array.
-     *
-     * @param  int  $offset
-     * @param  int|null  $length
-     * @return static
-     */
-    public function slice($offset, $length = null)
-    {
-        return new static(array_slice($this->items, $offset, $length, true));
-    }
-
-    /**
-     * Split a collection into a certain number of groups.
-     *
-     * @param  int  $numberOfGroups
-     * @return static
-     */
-    public function split($numberOfGroups)
-    {
-        if ($this->isEmpty()) {
-            return new static;
-        }
-
-        $groups = new static;
-
-        $groupSize = floor($this->count() / $numberOfGroups);
-
-        $remain = $this->count() % $numberOfGroups;
-
-        $start = 0;
-
-        for ($i = 0; $i < $numberOfGroups; $i++) {
-            $size = $groupSize;
-
-            if ($i < $remain) {
-                $size++;
-            }
-
-            if ($size) {
-                $groups->push(new static(array_slice($this->items, $start, $size)));
-
-                $start += $size;
-            }
-        }
-
-        return $groups;
-    }
-
-    /**
-     * Split a collection into a certain number of groups, and fill the first groups completely.
-     *
-     * @param  int  $numberOfGroups
-     * @return static
-     */
-    public function splitIn($numberOfGroups)
-    {
-        return $this->chunk(ceil($this->count() / $numberOfGroups));
-    }
-
-    /**
-     * Get the first item in the collection, but only if exactly one item exists. Otherwise, throw an exception.
-     *
-     * @param  mixed  $key
-     * @param  mixed  $operator
-     * @param  mixed  $value
-     * @return mixed
-     *
-     * @throws \Illuminate\Support\ItemNotFoundException
-     * @throws \Illuminate\Support\MultipleItemsFoundException
-     */
-    public function sole($key = null, $operator = null, $value = null)
-    {
-        $filter = func_num_args() > 1
-            ? $this->operatorForWhere(...func_get_args())
-            : $key;
-
-        $items = $this->when($filter)->filter($filter);
-
-        if ($items->isEmpty()) {
-            throw new ItemNotFoundException;
-        }
-
-        if ($items->count() > 1) {
-            throw new MultipleItemsFoundException;
-        }
-
-        return $items->first();
-    }
-
-    /**
-     * Get the first item in the collection but throw an exception if no matching items exist.
-     *
-     * @param  mixed  $key
-     * @param  mixed  $operator
-     * @param  mixed  $value
-     * @return mixed
-     *
-     * @throws \Illuminate\Support\ItemNotFoundException
-     */
-    public function firstOrFail($key = null, $operator = null, $value = null)
-    {
-        $filter = func_num_args() > 1
-            ? $this->operatorForWhere(...func_get_args())
-            : $key;
-
-        $placeholder = new stdClass();
-
-        $item = $this->first($filter, $placeholder);
-
-        if ($item === $placeholder) {
-            throw new ItemNotFoundException;
-        }
-
-        return $item;
-    }
-
-    /**
-     * Chunk the collection into chunks of the given size.
-     *
-     * @param  int  $size
-     * @return static
-     */
-    public function chunk($size)
-    {
-        if ($size <= 0) {
-            return new static;
-        }
-
-        $chunks = [];
-
-        foreach (array_chunk($this->items, $size, true) as $chunk) {
-            $chunks[] = new static($chunk);
-        }
-
-        return new static($chunks);
-    }
-
-    /**
-     * Chunk the collection into chunks with a callback.
-     *
-     * @param  callable  $callback
-     * @return static
-     */
-    public function chunkWhile(callable $callback)
-    {
-        return new static(
-            $this->lazy()->chunkWhile($callback)->mapInto(static::class)
-        );
-    }
-
-    /**
-     * Sort through each item with a callback.
-     *
-     * @param  callable|int|null  $callback
-     * @return static
-     */
-    public function sort($callback = null)
-    {
-        $items = $this->items;
-
-        $callback && is_callable($callback)
-            ? uasort($items, $callback)
-            : asort($items, $callback ?? SORT_REGULAR);
-
-        return new static($items);
-    }
-
-    /**
-     * Sort items in descending order.
-     *
-     * @param  int  $options
-     * @return static
-     */
-    public function sortDesc($options = SORT_REGULAR)
-    {
-        $items = $this->items;
-
-        arsort($items, $options);
-
-        return new static($items);
-    }
-
-    /**
-     * Sort the collection using the given callback.
-     *
-     * @param  callable|array|string  $callback
-     * @param  int  $options
-     * @param  bool  $descending
-     * @return static
-     */
-    public function sortBy($callback, $options = SORT_REGULAR, $descending = false)
-    {
-        if (is_array($callback) && ! is_callable($callback)) {
-            return $this->sortByMany($callback);
-        }
-
-        $results = [];
-
-        $callback = $this->valueRetriever($callback);
-
-        // First we will loop through the items and get the comparator from a callback
-        // function which we were given. Then, we will sort the returned values and
-        // grab all the corresponding values for the sorted keys from this array.
-        foreach ($this->items as $key => $value) {
-            $results[$key] = $callback($value, $key);
-        }
-
-        $descending ? arsort($results, $options)
-            : asort($results, $options);
-
-        // Once we have sorted all of the keys in the array, we will loop through them
-        // and grab the corresponding model so we can set the underlying items list
-        // to the sorted version. Then we'll just return the collection instance.
-        foreach (array_keys($results) as $key) {
-            $results[$key] = $this->items[$key];
-        }
-
-        return new static($results);
-    }
-
-    /**
-     * Sort the collection using multiple comparisons.
-     *
-     * @param  array  $comparisons
-     * @return static
-     */
-    protected function sortByMany(array $comparisons = [])
-    {
-        $items = $this->items;
-
-        usort($items, function ($a, $b) use ($comparisons) {
-            foreach ($comparisons as $comparison) {
-                $comparison = Arr::wrap($comparison);
-
-                $prop = $comparison[0];
-
-                $ascending = Arr::get($comparison, 1, true) === true ||
-                             Arr::get($comparison, 1, true) === 'asc';
-
-                $result = 0;
-
-                if (! is_string($prop) && is_callable($prop)) {
-                    $result = $prop($a, $b);
-                } else {
-                    $values = [data_get($a, $prop), data_get($b, $prop)];
-
-                    if (! $ascending) {
-                        $values = array_reverse($values);
-                    }
-
-                    $result = $values[0] <=> $values[1];
-                }
-
-                if ($result === 0) {
-                    continue;
-                }
-
-                return $result;
-            }
-        });
-
-        return new static($items);
-    }
-
-    /**
-     * Sort the collection in descending order using the given callback.
-     *
-     * @param  callable|string  $callback
-     * @param  int  $options
-     * @return static
-     */
-    public function sortByDesc($callback, $options = SORT_REGULAR)
-    {
-        return $this->sortBy($callback, $options, true);
-    }
-
-    /**
-     * Sort the collection keys.
-     *
-     * @param  int  $options
-     * @param  bool  $descending
-     * @return static
-     */
-    public function sortKeys($options = SORT_REGULAR, $descending = false)
-    {
-        $items = $this->items;
-
-        $descending ? krsort($items, $options) : ksort($items, $options);
-
-        return new static($items);
-    }
-
-    /**
-     * Sort the collection keys in descending order.
-     *
-     * @param  int  $options
-     * @return static
-     */
-    public function sortKeysDesc($options = SORT_REGULAR)
-    {
-        return $this->sortKeys($options, true);
-    }
-
-    /**
-     * Sort the collection keys using a callback.
-     *
-     * @param  callable  $callback
-     * @return static
-     */
-    public function sortKeysUsing(callable $callback)
-    {
-        $items = $this->items;
-
-        uksort($items, $callback);
-
-        return new static($items);
-    }
-
-    /**
-     * Splice a portion of the underlying collection array.
-     *
-     * @param  int  $offset
-     * @param  int|null  $length
-     * @param  mixed  $replacement
-     * @return static
-     */
-    public function splice($offset, $length = null, $replacement = [])
-    {
-        if (func_num_args() === 1) {
-            return new static(array_splice($this->items, $offset));
-        }
-
-        return new static(array_splice($this->items, $offset, $length, $this->getArrayableItems($replacement)));
-    }
-
-    /**
-     * Take the first or last {$limit} items.
-     *
-     * @param  int  $limit
-     * @return static
-     */
-    public function take($limit)
-    {
-        if ($limit < 0) {
-            return $this->slice($limit, abs($limit));
-        }
-
-        return $this->slice(0, $limit);
-    }
-
-    /**
-     * Take items in the collection until the given condition is met.
-     *
-     * @param  mixed  $value
-     * @return static
-     */
-    public function takeUntil($value)
-    {
-        return new static($this->lazy()->takeUntil($value)->all());
-    }
-
-    /**
-     * Take items in the collection while the given condition is met.
-     *
-     * @param  mixed  $value
-     * @return static
-     */
-    public function takeWhile($value)
-    {
-        return new static($this->lazy()->takeWhile($value)->all());
-    }
-
-    /**
-     * Transform each item in the collection using a callback.
-     *
-     * @param  callable  $callback
-     * @return $this
-     */
-    public function transform(callable $callback)
-    {
-        $this->items = $this->map($callback)->all();
-
-        return $this;
-    }
-
-    /**
-     * Convert a flatten "dot" notation array into an expanded array.
-     *
-     * @return static
-     */
-    public function undot()
-    {
-        return new static(Arr::undot($this->all()));
-    }
-
-    /**
-     * Return only unique items from the collection array.
-     *
-     * @param  string|callable|null  $key
-     * @param  bool  $strict
-     * @return static
-     */
-    public function unique($key = null, $strict = false)
-    {
-        if (is_null($key) && $strict === false) {
-            return new static(array_unique($this->items, SORT_REGULAR));
-        }
-
-        $callback = $this->valueRetriever($key);
-
-        $exists = [];
-
-        return $this->reject(function ($item, $key) use ($callback, $strict, &$exists) {
-            if (in_array($id = $callback($item, $key), $exists, $strict)) {
-                return true;
-            }
-
-            $exists[] = $id;
-        });
-    }
-
-    /**
-     * Reset the keys on the underlying array.
-     *
-     * @return static
-     */
-    public function values()
-    {
-        return new static(array_values($this->items));
+        return $this->toBase()->keys();
     }
 
     /**
      * Zip the collection together with one or more arrays.
      *
-     * e.g. new Collection([1, 2, 3])->zip([4, 5, 6]);
-     *      => [[1, 4], [2, 5], [3, 6]]
-     *
      * @param  mixed  ...$items
-     * @return static
+     * @return \Illuminate\Support\Collection
      */
     public function zip($items)
     {
-        $arrayableItems = array_map(function ($items) {
-            return $this->getArrayableItems($items);
-        }, func_get_args());
+        return $this->toBase()->zip(...func_get_args());
+    }
 
-        $params = array_merge([function () {
-            return new static(func_get_args());
-        }, $this->items], $arrayableItems);
+    /**
+     * Collapse the collection of items into a single array.
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function collapse()
+    {
+        return $this->toBase()->collapse();
+    }
 
-        return new static(array_map(...$params));
+    /**
+     * Get a flattened array of the items in the collection.
+     *
+     * @param  int  $depth
+     * @return \Illuminate\Support\Collection
+     */
+    public function flatten($depth = INF)
+    {
+        return $this->toBase()->flatten($depth);
+    }
+
+    /**
+     * Flip the items in the collection.
+     *
+     * @return \Illuminate\Support\Collection
+     */
+    public function flip()
+    {
+        return $this->toBase()->flip();
     }
 
     /**
@@ -1554,119 +616,135 @@ class Collection implements ArrayAccess, CanBeEscapedWhenCastToString, Enumerabl
      *
      * @param  int  $size
      * @param  mixed  $value
-     * @return static
+     * @return \Illuminate\Support\Collection
      */
     public function pad($size, $value)
     {
-        return new static(array_pad($this->items, $size, $value));
+        return $this->toBase()->pad($size, $value);
     }
 
     /**
-     * Get an iterator for the items.
+     * Get the comparison function to detect duplicates.
      *
-     * @return \ArrayIterator
+     * @param  bool  $strict
+     * @return \Closure
      */
-    #[\ReturnTypeWillChange]
-    public function getIterator()
+    protected function duplicateComparator($strict)
     {
-        return new ArrayIterator($this->items);
+        return function ($a, $b) {
+            return $a->is($b);
+        };
     }
 
     /**
-     * Count the number of items in the collection.
+     * Get the type of the entities being queued.
      *
-     * @return int
+     * @return string|null
+     *
+     * @throws \LogicException
      */
-    #[\ReturnTypeWillChange]
-    public function count()
+    public function getQueueableClass()
     {
-        return count($this->items);
+        if ($this->isEmpty()) {
+            return;
+        }
+
+        $class = get_class($this->first());
+
+        $this->each(function ($model) use ($class) {
+            if (get_class($model) !== $class) {
+                throw new LogicException('Queueing collections with multiple model types is not supported.');
+            }
+        });
+
+        return $class;
     }
 
     /**
-     * Count the number of items in the collection by a field or using a callback.
+     * Get the identifiers for all of the entities.
      *
-     * @param  callable|string  $countBy
-     * @return static
+     * @return array
      */
-    public function countBy($countBy = null)
+    public function getQueueableIds()
     {
-        return new static($this->lazy()->countBy($countBy)->all());
+        if ($this->isEmpty()) {
+            return [];
+        }
+
+        return $this->first() instanceof QueueableEntity
+                    ? $this->map->getQueueableId()->all()
+                    : $this->modelKeys();
     }
 
     /**
-     * Add an item to the collection.
+     * Get the relationships of the entities being queued.
      *
-     * @param  mixed  $item
-     * @return $this
+     * @return array
      */
-    public function add($item)
+    public function getQueueableRelations()
     {
-        $this->items[] = $item;
+        if ($this->isEmpty()) {
+            return [];
+        }
 
-        return $this;
-    }
+        $relations = $this->map->getQueueableRelations()->all();
 
-    /**
-     * Get a base Support collection instance from this collection.
-     *
-     * @return \Illuminate\Support\Collection
-     */
-    public function toBase()
-    {
-        return new self($this);
-    }
-
-    /**
-     * Determine if an item exists at an offset.
-     *
-     * @param  mixed  $key
-     * @return bool
-     */
-    #[\ReturnTypeWillChange]
-    public function offsetExists($key)
-    {
-        return isset($this->items[$key]);
-    }
-
-    /**
-     * Get an item at a given offset.
-     *
-     * @param  mixed  $key
-     * @return mixed
-     */
-    #[\ReturnTypeWillChange]
-    public function offsetGet($key)
-    {
-        return $this->items[$key];
-    }
-
-    /**
-     * Set the item at a given offset.
-     *
-     * @param  mixed  $key
-     * @param  mixed  $value
-     * @return void
-     */
-    #[\ReturnTypeWillChange]
-    public function offsetSet($key, $value)
-    {
-        if (is_null($key)) {
-            $this->items[] = $value;
+        if (count($relations) === 0 || $relations === [[]]) {
+            return [];
+        } elseif (count($relations) === 1) {
+            return reset($relations);
         } else {
-            $this->items[$key] = $value;
+            return array_intersect(...array_values($relations));
         }
     }
 
     /**
-     * Unset the item at a given offset.
+     * Get the connection of the entities being queued.
      *
-     * @param  mixed  $key
-     * @return void
+     * @return string|null
+     *
+     * @throws \LogicException
      */
-    #[\ReturnTypeWillChange]
-    public function offsetUnset($key)
+    public function getQueueableConnection()
     {
-        unset($this->items[$key]);
+        if ($this->isEmpty()) {
+            return;
+        }
+
+        $connection = $this->first()->getConnectionName();
+
+        $this->each(function ($model) use ($connection) {
+            if ($model->getConnectionName() !== $connection) {
+                throw new LogicException('Queueing collections with multiple model connections is not supported.');
+            }
+        });
+
+        return $connection;
+    }
+
+    /**
+     * Get the Eloquent query builder from the collection.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder
+     *
+     * @throws \LogicException
+     */
+    public function toQuery()
+    {
+        $model = $this->first();
+
+        if (! $model) {
+            throw new LogicException('Unable to create query for empty collection.');
+        }
+
+        $class = get_class($model);
+
+        if ($this->filter(function ($model) use ($class) {
+            return ! $model instanceof $class;
+        })->isNotEmpty()) {
+            throw new LogicException('Unable to create query for collection with mixed types.');
+        }
+
+        return $model->newModelQuery()->whereKey($this->modelKeys());
     }
 }
