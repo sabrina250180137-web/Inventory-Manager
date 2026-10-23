@@ -1,193 +1,49 @@
 <?php
 
-namespace Faker\Provider\lt_LT;
+namespace Faker\Provider\sr_Cyrl_RS;
 
 class Address extends \Faker\Provider\Address
 {
-    protected static $cityPrefix = ['miestas'];
+    protected static $postcode = ['#####'];
 
-    protected static $regionSuffix = ['regionas'];
-    protected static $streetSuffix = [
-        'g.', 'gatvė', 'prospektas', 'alėja',
-    ];
-
-    protected static $buildingNumber = ['%#'];
-
-    protected static $postcode = ['LT-#####'];
-
-    protected static $country = [
-        'Afganistanas', 'Airija', 'Alandų salos', 'Albanija', 'Alžyras', 'Amerikos Samoa', 'Andora',
-        'Angilija', 'Angola', 'Antarktis', 'Antigva ir Barbuda', 'Argentina', 'Armėnija', 'Aruba', 'Australija', 'Austrija',
-        'Azerbaidžanas', 'Bahamos', 'Bahreinas', 'Baltarusija', 'Bangladešas', 'Barbadosas', 'Belgija', 'Belizas',
-        'Beninas', 'Bermuda', 'Bisau Gvinėja', 'Bolivija', 'Bosnija ir Hercegovina', 'Botsvana', 'Bouvet sala', 'Brazilija',
-        'Brunėjus', 'Bulgarija', 'Burkina Fasas', 'Burundis', 'Butanas', 'Centrinės Afrikos Respublika', 'Danija',
-        'Didžioji Britanija', 'Didžiosios Britanijos Mergelių salos', 'Dominika', 'Dominikos Respublika',
-        'Dramblio Kaulo Krantas',
-        'Džersis', 'Džibutis', 'Egiptas', 'Ekvadoras', 'Eritrėja', 'Estija', 'Etiopija', 'Falklando salos', 'Farerų salos',
-        'Fidžis', 'Filipinai', 'Gabonas', 'Gajana', 'Gambija', 'Gana', 'Gibraltaras', 'Graikija', 'Grenada', 'Grenlandija',
-        'Gruzija', 'Guamas', 'Guernsis', 'Gvadelupė', 'Gvatemala', 'Gvinėja', 'Haitis', 'Heardo ir McDonaldo Salų Sritis',
-        'Hondūras', 'Indija', 'Indijos vandenyno britų sritis', 'Indonezija', 'Irakas', 'Iranas', 'Islandija', 'Ispanija',
-        'Italija', 'Izraelis', 'Jamaika', 'Japonija', 'Jemenas', 'Jordanija', 'Jungtiniai Arabų Emyratai', 'Jungtinių
-    Valstijų mažosios aplinkinės salos', 'Jungtinės Valstijos', 'Juodkalnija', 'Kaimanų salos', 'Kalėdų sala',
-        'Kambodža', 'Kamerūnas', 'Kanada', 'Kataras', 'Kazachstanas', 'Kenija', 'Kinija', 'Kinijos S.A.R.Honkongas',
-        'Kipras', 'Kirgiztanas', 'Kiribatis', 'Kokosų salos', 'Kolumbija', 'Komorai', 'Kongas', 'Kongo Demokratinė
-    Respublika', 'Kosta Rika', 'Kroatija', 'Kuba', 'Kuko salos', 'Kuveitas', 'Laosas', 'Latvija', 'Lenkija', 'Lesotas',
-        'Libanas', 'Liberija', 'Libija', 'Lichtenšteinas', 'Lietuva', 'Liuksemburgas', 'Macao', 'Madagaskaras',
-        'Makedonija', 'Malaizija', 'Malavis', 'Maldivai', 'Malis', 'Malta', 'Marianos šiaurinės salos', 'Marokas',
-        'Martinika', 'Maršalo Salos', 'Mauricijus', 'Mauritanija', 'Mayotte’as', 'Meino sala', 'Meksika', 'Mergelių salos
-    (JAV)', 'Mianmaras', 'Mikronezija', 'Moldova', 'Monakas', 'Mongolija', 'Montserratas', 'Mozambikas', 'Namibija',
-        'Naujoji Kaledonija', 'Naujoji Zelandija', 'Nauru', 'Nepalas', 'Nežinoma ar neteisinga sritis', 'Nigerija',
-        'Nigeris', 'Nikaragva', 'Niue', 'Norfolko sala', 'Norvegija', 'Nyderlandai', 'Olandijos Antilai', 'Omanas',
-        'Pakistanas', 'Palau', 'Palestinos teritorija', 'Panama', 'Papua Naujoji Gvinėja', 'Paragvajus', 'Peru', 'Pietų
-    Afrika', 'Pietų Džordžija ir Pietų Sandvičo salos', 'Pietų Korėja', 'Pitkernas', 'Portugalija', 'Prancūzija',
-        'Prancūzijos Gviana', 'Prancūzijos Pietų sritys', 'Prancūzų Polinezija', 'Puerto Rikas', 'Pusiaujo Gvinėja',
-        'Reunionas', 'Ruanda', 'Rumunija', 'Rusijos Federacija', 'Rytų Timoras', 'Saint-Martin', 'Saliamono salos',
-        'Salvadoras', 'Samoa', 'San Marinas', 'San Tomė ir Principė', 'Saudo Arabija', 'Seišeliai', 'Sen Pjeras ir
-    Mikelonas', 'Senegalas', 'Sent Kitsas ir Nevis', 'Serbija', 'Serbija ir Juodkalnija', 'Siera Leonė', 'Singapūras',
-        'Sirija', 'Slovakija', 'Slovėnija', 'Somalis', 'Sudanas', 'Suomija', 'Surinamas', 'Svalbardo ir Jan Majen salos',
-        'Svazilendas', 'Tadžikistanas', 'Tailandas', 'Taivanas', 'Tanzanija', 'Togas', 'Tokelau', 'Tonga', 'Trinidadas ir
-    Tobagas', 'Tunisas', 'Turkija', 'Turkmėnistanas', 'Turkso ir Caicoso salos', 'Tuvalu', 'Uganda', 'Ukraina',
-        'Urugvajus', 'Uzbekistanas', 'Vakarų Sachara', 'Vanuatu', 'Vatikanas', 'Venesuela', 'Vengrija', 'Vietnamas',
-        'Vokietija', 'Wallisas ir Futuna', 'Zambija', 'Zimbabvė', 'Čadas', 'Čekija', 'Čilė', 'Šiaurės Korėja', 'Šri Lanka',
-        'Švedija', 'Šveicarija', 'Šventasis Vincentas ir Grenadinai', 'Švento Baltramiejaus sala', 'Šventoji Elena',
-        'Šventoji Liucija', 'Žaliasis Kyšulys', ];
-
-    /**
-     * @see https://lt.wikipedia.org/wiki/Lietuvos_etnokult%C5%ABriniai_regionai
-     */
-    protected static $region = [
-        'Aukštaitija', 'Dzūkija', 'Suvalkija', 'Žemaitija',
-    ];
-
-    /**
-     * @see https://lt.wikipedia.org/wiki/S%C4%85ra%C5%A1as:Lietuvos_miestai_pagal_gyventojus
-     */
-    protected static $city = ['Vilnius', 'Kaunas', 'Klaipėda', 'Šiauliai', 'Panevėžys',
-        'Alytus', 'Marijampolė', 'Mažeikiai', 'Jonava', 'Utena', 'Kėdainiai', 'Telšiai', 'Visaginas', 'Tauragė',
-        'Ukmergė',
+    protected static $streetPrefix = [
+        'Булевар',
     ];
 
     protected static $street = [
-        'Klaipėdos', 'Vilniaus', 'Kauno', 'Žalgirio', 'Saltoniškių', 'Laisvės', 'Didžioji', 'Liepų',
+        'Краља Милана', 'Цара Душана', 'Николе Тесле', 'Михајла Пупина', 'Николе Пашића',
     ];
 
-    protected static $addressFormats = [
-        '{{street}} {{streetSuffix}} {{buildingNumber}}-{{buildingNumber}}, {{city}}',
-        '{{street}} {{streetSuffix}} {{buildingNumber}}, {{city}}',
-        '{{street}} {{streetSuffix}} {{buildingNumber}}, {{city}} {{postcode}}',
+    protected static $streetNameFormats = [
+        '{{street}}',
+        '{{streetPrefix}} {{street}}',
+    ];
+
+    protected static $streetAddressFormats = [
+        '{{streetName}} {{buildingNumber}}',
+    ];
+
+    protected static $cityFormats = [
+        '{{cityName}}',
     ];
 
     /**
-     * @see https://en.wikipedia.org/wiki/Municipalities_of_Lithuania
+     * @see http://sr.wikipedia.org/wiki/%D0%93%D1%80%D0%B0%D0%B4%D0%BE%D0%B2%D0%B8_%D1%83_%D0%A1%D1%80%D0%B1%D0%B8%D1%98%D0%B8
      */
-    private static $municipality = [
-        'Akmenės rajono savivaldybė',
-        'Alytaus miesto savivaldybė',
-        'Alytaus rajono savivaldybė',
-        'Anykščių rajono savivaldybė',
-        'Birštono savivaldybė',
-        'Biržų rajono savivaldybė',
-        'Druskininkų savivaldybė',
-        'Elektrėnų savivaldybė',
-        'Ignalinos rajono savivaldybė',
-        'Jonavos rajono savivaldybė',
-        'Joniškio rajono savivaldybė',
-        'Jurbarko rajono savivaldybė',
-        'Kaišiadorių rajono savivaldybė',
-        'Kalvarijos savivaldybė',
-        'Kauno miesto savivaldybė',
-        'Kauno rajono savivaldybė',
-        'Kazlų Rūdos savivaldybė',
-        'Kėdainių rajono savivaldybė',
-        'Kelmės rajono savivaldybė',
-        'Klaipėdos miesto savivaldybė',
-        'Klaipėdos rajono savivaldybė',
-        'Kretingos rajono savivaldybė',
-        'Kupiškio rajono savivaldybė',
-        'Lazdijų rajono savivaldybė',
-        'Marijampolės savivaldybė',
-        'Mažeikių rajono savivaldybė',
-        'Molėtų rajono savivaldybė',
-        'Neringos savivaldybė',
-        'Pagėgių savivaldybė',
-        'Pakruojo rajono savivaldybė',
-        'Palangos miesto savivaldybė',
-        'Panevėžio miesto savivaldybė',
-        'Panevėžio rajono savivaldybė',
-        'Pasvalio rajono savivaldybė',
-        'Plungės rajono savivaldybė',
-        'Prienų rajono savivaldybė',
-        'Radviliškio rajono savivaldybė',
-        'Raseinių rajono savivaldybė',
-        'Rietavo savivaldybė',
-        'Rokiškio rajono savivaldybė',
-        'Skuodo rajono savivaldybė',
-        'Šakių rajono savivaldybė',
-        'Šalčininkų rajono savivaldybė',
-        'Šiaulių miesto savivaldybė',
-        'Šiaulių rajono savivaldybė',
-        'Šilalės rajono savivaldybė',
-        'Šilutės rajono savivaldybė',
-        'Širvintų rajono savivaldybė',
-        'Švenčionių rajono savivaldybė',
-        'Tauragės rajono savivaldybė',
-        'Telšių rajono savivaldybė',
-        'Trakų rajono savivaldybė',
-        'Ukmergės rajono savivaldybė',
-        'Utenos rajono savivaldybė',
-        'Varėnos rajono savivaldybė',
-        'Vilkaviškio rajono savivaldybė',
-        'Vilniaus miesto savivaldybė',
-        'Vilniaus rajono savivaldybė',
-        'Visagino savivaldybė',
-        'Zarasų rajono savivaldybė',
+    protected static $cityNames = [
+        'Београд', 'Ваљево', 'Врање', 'Зајечар', 'Зрењанин', 'Јагодина', 'Крагујевац', 'Краљево', 'Крушевац', 'Лесковац', 'Лозница', 'Ниш', 'Нови Пазар', 'Нови Сад', 'Панчево', 'Пожаревац', 'Приштина', 'Смедерево', 'Сомбор', 'Сремска Митровица', 'Суботица', 'Ужице', 'Чачак', 'Шабац',
     ];
 
-    public static function buildingNumber()
-    {
-        return static::numerify(static::randomElement(static::$buildingNumber));
-    }
+    /**
+     * @see https://github.com/umpirsky/country-list/blob/master/country/cldr/sr_Cyrl/country.php
+     */
+    protected static $country = [
+        'Острво Асенсион', 'Андора', 'Уједињени Арапски Емирати', 'Авганистан', 'Антигве и Барбуда', 'Ангвила', 'Албанија', 'Арменија', 'Холандски Антили', 'Ангола', 'Антарктик', 'Аргентина', 'Америчка Самоа', 'Аустрија', 'Аустралија', 'Аруба', 'Аландска острва', 'Азербејџан', 'Босна и Херцеговина', 'Барбадос', 'Бангладеш', 'Белгија', 'Буркина Фасо', 'Бугарска', 'Бахреин', 'Бурунди', 'Бенин', 'Свети Бартоломеј', 'Бермуда', 'Брунеј', 'Боливија', 'Бразил', 'Бахами', 'Бутан', 'Буве Острва', 'Боцвана', 'Белорусија', 'Белизе', 'Канада', 'Кокос (Келинг) Острва', 'Конго - Киншаса', 'Централно Афричка Република', 'Конго - Бразавил', 'Швајцарска', 'Обала Слоноваче', 'Кукова Острва', 'Чиле', 'Камерун', 'Кина', 'Колумбија', 'Острво Клипертон', 'Костарика', 'Србија и Црна Гора', 'Куба', 'Капе Верде', 'Божићна острва', 'Кипар', 'Чешка', 'Немачка', 'Дијего Гарсија', 'Џибути', 'Данска', 'Доминика', 'Доминиканска Република', 'Алжир', 'Сеута и Мелиља', 'Еквадор', 'Естонија', 'Египат', 'Западна Сахара', 'Еритреја', 'Шпанија', 'Етиопија', 'Европска Унија', 'Финска', 'Фиџи', 'Фолкландска Острва', 'Микронезија', 'Фарска Острва', 'Француска', 'Габон', 'Велика Британија', 'Гренада', 'Грузија', 'Француска Гвајана', 'Гурнси', 'Гана', 'Гибралтар', 'Гренланд', 'Гамбија', 'Гвинеја', 'Гваделупе', 'Екваторијална Гвинеја', 'Грчка', 'Јужна Џорџија и Јужна Сендвич Острва', 'Гватемала', 'Гуам', 'Гвинеја-Бисао', 'Гвајана', 'Хонг Конг С. А. Р. Кина', 'Херд и Мекдоналд Острва', 'Хондурас', 'Хрватска', 'Хаити', 'Мађарска', 'Канарска острва', 'Индонезија', 'Ирска', 'Израел', 'Острво Ман', 'Индија', 'Британска територија у Индијском океану', 'Ирак', 'Иран', 'Исланд', 'Италија', 'Џерси', 'Јамајка', 'Јордан', 'Јапан', 'Кенија', 'Киргизстан', 'Камбоџа', 'Кирибати', 'Коморска Острва', 'Сент Китс и Невис', 'Северна Кореја', 'Јужна Кореја', 'Кувајт', 'Кајманска Острва', 'Казахстан', 'Лаос', 'Либан', 'Сент Луција', 'Лихтенштајн', 'Шри Ланка', 'Либерија', 'Лесото', 'Литванија', 'Луксембург', 'Летонија', 'Либија', 'Мароко', 'Монако', 'Молдавија', 'Црна Гора', 'Сент Мартин', 'Мадагаскар', 'Маршалска Острва', 'Македонија', 'Мали', 'Мијанмар [Бурма]', 'Монголија', 'Макао С. А. Р. Кина', 'Северна Маријанска Острва', 'Мартиник', 'Мауританија', 'Монсерат', 'Малта', 'Маурицијус', 'Малдиви', 'Малави', 'Мексико', 'Малезија', 'Мозамбик', 'Намибија', 'Нова Каледонија', 'Нигер', 'Норфолк Острво', 'Нигерија', 'Никарагва', 'Холандија', 'Норвешка', 'Непал', 'Науру', 'Ниуе', 'Нови Зеланд', 'Оман', 'Панама', 'Перу', 'Француска Полинезија', 'Папуа Нова Гвинеја', 'Филипини', 'Пакистан', 'Пољска', 'Сен Пјер и Микелон', 'Питкерн', 'Порто Рико', 'Палестинске територије', 'Португал', 'Палау', 'Парагвај', 'Катар', 'Остала океанија', 'Реинион', 'Румунија', 'Србија', 'Русија', 'Руанда', 'Саудијска Арабија', 'Соломонска Острва', 'Сејшели', 'Судан', 'Шведска', 'Сингапур', 'Света Јелена', 'Словенија', 'Свалбард и Јанмајен Острва', 'Словачка', 'Сијера Леоне', 'Сан Марино', 'Сенегал', 'Сомалија', 'Суринам', 'Сао Томе и Принципе', 'Салвадор', 'Сирија', 'Свазиленд', 'Тристан да Куња', 'Туркс и Кајкос Острва', 'Чад', 'Француске Јужне Територије', 'Того', 'Тајланд', 'Таџикистан', 'Токелау', 'Источни Тимор', 'Туркменистан', 'Тунис', 'Тонга', 'Турска', 'Тринидад и Тобаго', 'Тувалу', 'Тајван', 'Танзанија', 'Украјина', 'Уганда', 'Мања удаљена острва САД', 'Сједињене Америчке Државе', 'Уругвај', 'Узбекистан', 'Ватикан', 'Сент Винсент и Гренадини', 'Венецуела', 'Британска Девичанска Острва', 'С.А.Д. Девичанска Острва', 'Вијетнам', 'Вануату', 'Валис и Футуна Острва', 'Самоа', 'Јемен', 'Мајоте', 'Јужноафричка Република', 'Замбија', 'Зимбабве',
+    ];
 
-    public function address()
+    public static function streetPrefix()
     {
-        $format = static::randomElement(static::$addressFormats);
-
-        return $this->generator->parse($format);
-    }
-
-    public static function country()
-    {
-        return static::randomElement(static::$country);
-    }
-
-    public static function postcode()
-    {
-        return static::toUpper(static::bothify(static::randomElement(static::$postcode)));
-    }
-
-    public static function regionSuffix()
-    {
-        return static::randomElement(static::$regionSuffix);
-    }
-
-    public static function region()
-    {
-        return static::randomElement(static::$region);
-    }
-
-    public static function citySuffix()
-    {
-        return static::randomElement(static::$citySuffix);
-    }
-
-    public function city()
-    {
-        return static::randomElement(static::$city);
-    }
-
-    public static function streetSuffix()
-    {
-        return static::randomElement(static::$streetSuffix);
+        return static::randomElement(static::$streetPrefix);
     }
 
     public static function street()
@@ -195,15 +51,8 @@ class Address extends \Faker\Provider\Address
         return static::randomElement(static::$street);
     }
 
-    /**
-     * Lithuania municipality
-     *
-     * @see https://en.wikipedia.org/wiki/Municipality
-     *
-     * @return string
-     */
-    public function municipality()
+    public function cityName()
     {
-        return static::randomElement(static::$municipality);
+        return static::randomElement(static::$cityNames);
     }
 }
