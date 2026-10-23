@@ -1,35 +1,32 @@
 # Contributing
+hamcrest-php is an open source, community-driven project. If you'd like to contribute, feel free to do this, but remember to follow these few simple rules:
 
- * Follow the [Doctrine Coding Standard](https://github.com/doctrine/coding-standard)
- * The project will follow strict [object calisthenics](http://www.slideshare.net/guilhermeblanco/object-calisthenics-applied-to-php)
- * Any contribution must provide tests for additional introduced conditions
- * Any un-confirmed issue needs a failing test case before being accepted
- * Pull requests must be sent from a new hotfix/feature branch, not from `master`.
+## Asking Questions
+Feel free to ask any questions and share your experiences in the [Issue tracking system](https://github.com/hamcrest/hamcrest-php/issues/) and help to improve the documentation.
 
-## Installation
+## Submitting an issues
+- A reproducible example is required for every bug report, otherwise it will most probably be __closed without warning__.
+- If you are going to make a big, substantial change, let's discuss it first.
 
-To install the project and run the tests, you need to clone it first:
+## Working with Pull Requests
+1. Create your feature addition or a bug fix branch based on __`master`__ branch in your repository's fork.
+2. Make necessary changes, but __don't mix__ code reformatting with code changes on topic.
+3. Add tests for those changes (please look into `tests/` folder for some examples). This is important so we don't break it in a future version unintentionally.
+4. Check your code using "Coding Standard" (see below).
+5. Commit your code.
+6. Squash your commits by topic to preserve a clean and readable log.
+7. Create Pull Request.
 
-```sh
-$ git clone git://github.com/doctrine/instantiator.git
-```
+## Running the Tests
 
-You will then need to run a composer installation:
+### Installation/Configuration
 
-```sh
-$ cd Instantiator
-$ curl -s https://getcomposer.org/installer | php
-$ php composer.phar update
-```
+1. Using `git clone https://github.com/hamcrest/hamcrest-php` to clone this repository.
+2. Using the `composer update` to update the dependencies to support your development environment.
+3. Using `vendor/bin/phpunit -c tests/phpunit.xml.dist` command to do unit test works.
 
-## Testing
+## Contributor Code of Conduct
 
-The PHPUnit version to be used is the one installed as a dev- dependency via composer:
-
-```sh
-$ ./vendor/bin/phpunit
-```
-
-Accepted coverage for new contributions is 80%. Any contribution not satisfying this requirement 
-won't be merged.
-
+Please note that this project is released with a [Contributor Code of
+Conduct](http://contributor-covenant.org/). By participating in this project
+you agree to abide by its terms. See [CODE_OF_CONDUCT](CODE_OF_CONDUCT.md) file.
