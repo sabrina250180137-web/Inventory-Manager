@@ -1,10 +1,28 @@
 <?php
 
-namespace Faker\Provider\sl_SI;
+namespace Faker\Provider\zh_TW;
 
+/**
+ * @deprecated Use {@link \Faker\Provider\Internet} instead
+ * @see \Faker\Provider\Internet
+ */
 class Internet extends \Faker\Provider\Internet
 {
-    protected static $freeEmailDomain = ['gmail.com', 'gmail.com', 'gmail.com', 'hotmail.com', 'yahoo.com', 'siol.net', 't-2.net'];
+    /**
+     * @deprecated Use {@link \Faker\Provider\Internet::userName()} instead
+     * @see \Faker\Provider\Internet::userName()
+     */
+    public function userName()
+    {
+        return parent::userName();
+    }
 
-    protected static $tld = ['si', 'si', 'si', 'si', 'eu', 'com', 'info', 'net', 'org'];
+    /**
+     * @deprecated Use {@link \Faker\Provider\Internet::domainWord()} instead
+     * @see \Faker\Provider\Internet::domainWord()
+     */
+    public function domainWord()
+    {
+        return parent::domainWord();
+    }
 }
