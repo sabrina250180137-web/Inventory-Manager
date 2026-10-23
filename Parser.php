@@ -1,249 +1,144 @@
 <?php
 
-namespace Egulias\EmailValidator\Parser;
+namespace Illuminate\Console;
 
-use Egulias\EmailValidator\EmailLexer;
-use Egulias\EmailValidator\Exception\AtextAfterCFWS;
-use Egulias\EmailValidator\Exception\ConsecutiveDot;
-use Egulias\EmailValidator\Exception\CRLFAtTheEnd;
-use Egulias\EmailValidator\Exception\CRLFX2;
-use Egulias\EmailValidator\Exception\CRNoLF;
-use Egulias\EmailValidator\Exception\ExpectingQPair;
-use Egulias\EmailValidator\Exception\ExpectingATEXT;
-use Egulias\EmailValidator\Exception\ExpectingCTEXT;
-use Egulias\EmailValidator\Exception\UnclosedComment;
-use Egulias\EmailValidator\Exception\UnclosedQuotedString;
-use Egulias\EmailValidator\Warning\CFWSNearAt;
-use Egulias\EmailValidator\Warning\CFWSWithFWS;
-use Egulias\EmailValidator\Warning\Comment;
-use Egulias\EmailValidator\Warning\QuotedPart;
-use Egulias\EmailValidator\Warning\QuotedString;
+use Illuminate\Support\Str;
+use InvalidArgumentException;
+use Symfony\Component\Console\Input\InputArgument;
+use Symfony\Component\Console\Input\InputOption;
 
-abstract class Parser
+class Parser
 {
     /**
-     * @var array
-     */
-    protected $warnings = [];
-
-    /**
-     * @var EmailLexer
-     */
-    protected $lexer;
-
-    /**
-     * @var int
-     */
-    protected $openedParenthesis = 0;
-
-    public function __construct(EmailLexer $lexer)
-    {
-        $this->lexer = $lexer;
-    }
-
-    /**
-     * @return \Egulias\EmailValidator\Warning\Warning[]
-     */
-    public function getWarnings()
-    {
-        return $this->warnings;
-    }
-
-    /**
-     * @param string $str
-     */
-    abstract public function parse($str);
-
-    /** @return int */
-    public function getOpenedParenthesis()
-    {
-        return $this->openedParenthesis;
-    }
-
-    /**
-     * validateQuotedPair
-     */
-    protected function validateQuotedPair()
-    {
-        if (!($this->lexer->token['type'] === EmailLexer::INVALID
-            || $this->lexer->token['type'] === EmailLexer::C_DEL)) {
-            throw new ExpectingQPair();
-        }
-
-        $this->warnings[QuotedPart::CODE] =
-            new QuotedPart($this->lexer->getPrevious()['type'], $this->lexer->token['type']);
-    }
-
-    protected function parseComments()
-    {
-        $this->openedParenthesis = 1;
-        $this->isUnclosedComment();
-        $this->warnings[Comment::CODE] = new Comment();
-        while (!$this->lexer->isNextToken(EmailLexer::S_CLOSEPARENTHESIS)) {
-            if ($this->lexer->isNextToken(EmailLexer::S_OPENPARENTHESIS)) {
-                $this->openedParenthesis++;
-            }
-            $this->warnEscaping();
-            $this->lexer->moveNext();
-        }
-
-        $this->lexer->moveNext();
-        if ($this->lexer->isNextTokenAny(array(EmailLexer::GENERIC, EmailLexer::S_EMPTY))) {
-            throw new ExpectingATEXT();
-        }
-
-        if ($this->lexer->isNextToken(EmailLexer::S_AT)) {
-            $this->warnings[CFWSNearAt::CODE] = new CFWSNearAt();
-        }
-    }
-
-    /**
-     * @return bool
-     */
-    protected function isUnclosedComment()
-    {
-        try {
-            $this->lexer->find(EmailLexer::S_CLOSEPARENTHESIS);
-            return true;
-        } catch (\RuntimeException $e) {
-            throw new UnclosedComment();
-        }
-    }
-
-    protected function parseFWS()
-    {
-        $previous = $this->lexer->getPrevious();
-
-        $this->checkCRLFInFWS();
-
-        if ($this->lexer->token['type'] === EmailLexer::S_CR) {
-            throw new CRNoLF();
-        }
-
-        if ($this->lexer->isNextToken(EmailLexer::GENERIC) && $previous['type']  !== EmailLexer::S_AT) {
-            throw new AtextAfterCFWS();
-        }
-
-        if ($this->lexer->token['type'] === EmailLexer::S_LF || $this->lexer->token['type'] === EmailLexer::C_NUL) {
-            throw new ExpectingCTEXT();
-        }
-
-        if ($this->lexer->isNextToken(EmailLexer::S_AT) || $previous['type']  === EmailLexer::S_AT) {
-            $this->warnings[CFWSNearAt::CODE] = new CFWSNearAt();
-        } else {
-            $this->warnings[CFWSWithFWS::CODE] = new CFWSWithFWS();
-        }
-    }
-
-    protected function checkConsecutiveDots()
-    {
-        if ($this->lexer->token['type'] === EmailLexer::S_DOT && $this->lexer->isNextToken(EmailLexer::S_DOT)) {
-            throw new ConsecutiveDot();
-        }
-    }
-
-    /**
-     * @return bool
-     */
-    protected function isFWS()
-    {
-        if ($this->escaped()) {
-            return false;
-        }
-
-        if ($this->lexer->token['type'] === EmailLexer::S_SP ||
-            $this->lexer->token['type'] === EmailLexer::S_HTAB ||
-            $this->lexer->token['type'] === EmailLexer::S_CR ||
-            $this->lexer->token['type'] === EmailLexer::S_LF ||
-            $this->lexer->token['type'] === EmailLexer::CRLF
-        ) {
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * @return bool
-     */
-    protected function escaped()
-    {
-        $previous = $this->lexer->getPrevious();
-
-        if ($previous && $previous['type'] === EmailLexer::S_BACKSLASH
-            &&
-            $this->lexer->token['type'] !== EmailLexer::GENERIC
-        ) {
-            return true;
-        }
-
-        return false;
-    }
-
-    /**
-     * @return bool
-     */
-    protected function warnEscaping()
-    {
-        if ($this->lexer->token['type'] !== EmailLexer::S_BACKSLASH) {
-            return false;
-        }
-
-        if ($this->lexer->isNextToken(EmailLexer::GENERIC)) {
-            throw new ExpectingATEXT();
-        }
-
-        if (!$this->lexer->isNextTokenAny(array(EmailLexer::S_SP, EmailLexer::S_HTAB, EmailLexer::C_DEL))) {
-            return false;
-        }
-
-        $this->warnings[QuotedPart::CODE] =
-            new QuotedPart($this->lexer->getPrevious()['type'], $this->lexer->token['type']);
-        return true;
-
-    }
-
-    /**
-     * @param bool $hasClosingQuote
+     * Parse the given console command definition into an array.
      *
-     * @return bool
+     * @param  string  $expression
+     * @return array
+     *
+     * @throws \InvalidArgumentException
      */
-    protected function checkDQUOTE($hasClosingQuote)
+    public static function parse($expression)
     {
-        if ($this->lexer->token['type'] !== EmailLexer::S_DQUOTE) {
-            return $hasClosingQuote;
-        }
-        if ($hasClosingQuote) {
-            return $hasClosingQuote;
-        }
-        $previous = $this->lexer->getPrevious();
-        if ($this->lexer->isNextToken(EmailLexer::GENERIC) && $previous['type'] === EmailLexer::GENERIC) {
-            throw new ExpectingATEXT();
+        $name = static::name($expression);
+
+        if (preg_match_all('/\{\s*(.*?)\s*\}/', $expression, $matches)) {
+            if (count($matches[1])) {
+                return array_merge([$name], static::parameters($matches[1]));
+            }
         }
 
-        try {
-            $this->lexer->find(EmailLexer::S_DQUOTE);
-            $hasClosingQuote = true;
-        } catch (\Exception $e) {
-            throw new UnclosedQuotedString();
-        }
-        $this->warnings[QuotedString::CODE] = new QuotedString($previous['value'], $this->lexer->token['value']);
-
-        return $hasClosingQuote;
+        return [$name, [], []];
     }
 
-    protected function checkCRLFInFWS()
+    /**
+     * Extract the name of the command from the expression.
+     *
+     * @param  string  $expression
+     * @return string
+     *
+     * @throws \InvalidArgumentException
+     */
+    protected static function name($expression)
     {
-        if ($this->lexer->token['type'] !== EmailLexer::CRLF) {
-            return;
+        if (! preg_match('/[^\s]+/', $expression, $matches)) {
+            throw new InvalidArgumentException('Unable to determine command name from signature.');
         }
 
-        if (!$this->lexer->isNextTokenAny(array(EmailLexer::S_SP, EmailLexer::S_HTAB))) {
-            throw new CRLFX2();
+        return $matches[0];
+    }
+
+    /**
+     * Extract all of the parameters from the tokens.
+     *
+     * @param  array  $tokens
+     * @return array
+     */
+    protected static function parameters(array $tokens)
+    {
+        $arguments = [];
+
+        $options = [];
+
+        foreach ($tokens as $token) {
+            if (preg_match('/-{2,}(.*)/', $token, $matches)) {
+                $options[] = static::parseOption($matches[1]);
+            } else {
+                $arguments[] = static::parseArgument($token);
+            }
         }
 
-        if (!$this->lexer->isNextTokenAny(array(EmailLexer::S_SP, EmailLexer::S_HTAB))) {
-            throw new CRLFAtTheEnd();
+        return [$arguments, $options];
+    }
+
+    /**
+     * Parse an argument expression.
+     *
+     * @param  string  $token
+     * @return \Symfony\Component\Console\Input\InputArgument
+     */
+    protected static function parseArgument($token)
+    {
+        [$token, $description] = static::extractDescription($token);
+
+        switch (true) {
+            case Str::endsWith($token, '?*'):
+                return new InputArgument(trim($token, '?*'), InputArgument::IS_ARRAY, $description);
+            case Str::endsWith($token, '*'):
+                return new InputArgument(trim($token, '*'), InputArgument::IS_ARRAY | InputArgument::REQUIRED, $description);
+            case Str::endsWith($token, '?'):
+                return new InputArgument(trim($token, '?'), InputArgument::OPTIONAL, $description);
+            case preg_match('/(.+)\=\*(.+)/', $token, $matches):
+                return new InputArgument($matches[1], InputArgument::IS_ARRAY, $description, preg_split('/,\s?/', $matches[2]));
+            case preg_match('/(.+)\=(.+)/', $token, $matches):
+                return new InputArgument($matches[1], InputArgument::OPTIONAL, $description, $matches[2]);
+            default:
+                return new InputArgument($token, InputArgument::REQUIRED, $description);
         }
+    }
+
+    /**
+     * Parse an option expression.
+     *
+     * @param  string  $token
+     * @return \Symfony\Component\Console\Input\InputOption
+     */
+    protected static function parseOption($token)
+    {
+        [$token, $description] = static::extractDescription($token);
+
+        $matches = preg_split('/\s*\|\s*/', $token, 2);
+
+        if (isset($matches[1])) {
+            $shortcut = $matches[0];
+            $token = $matches[1];
+        } else {
+            $shortcut = null;
+        }
+
+        switch (true) {
+            case Str::endsWith($token, '='):
+                return new InputOption(trim($token, '='), $shortcut, InputOption::VALUE_OPTIONAL, $description);
+            case Str::endsWith($token, '=*'):
+                return new InputOption(trim($token, '=*'), $shortcut, InputOption::VALUE_OPTIONAL | InputOption::VALUE_IS_ARRAY, $description);
+            case preg_match('/(.+)\=\*(.+)/', $token, $matches):
+                return new InputOption($matches[1], $shortcut, InputOption::VALUE_OPTIONAL | InputOption::VALUE_IS_ARRAY, $description, preg_split('/,\s?/', $matches[2]));
+            case preg_match('/(.+)\=(.+)/', $token, $matches):
+                return new InputOption($matches[1], $shortcut, InputOption::VALUE_OPTIONAL, $description, $matches[2]);
+            default:
+                return new InputOption($token, $shortcut, InputOption::VALUE_NONE, $description);
+        }
+    }
+
+    /**
+     * Parse the token into its token and description segments.
+     *
+     * @param  string  $token
+     * @return array
+     */
+    protected static function extractDescription($token)
+    {
+        $parts = preg_split('/\s+:\s+/', trim($token), 2);
+
+        return count($parts) === 2 ? $parts : [$token, ''];
     }
 }
