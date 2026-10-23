@@ -1,87 +1,58 @@
 <?php
+namespace Hamcrest\Core;
 
-declare(strict_types=1);
-
-namespace GuzzleHttp\Promise;
+/*
+ Copyright (c) 2009 hamcrest.org
+ */
+use Hamcrest\BaseMatcher;
+use Hamcrest\Description;
+use Hamcrest\Matcher;
+use Hamcrest\Util;
 
 /**
- * @deprecated Is will be removed in guzzlehttp/promises:4.0. Use State instead.
+ * Decorates another Matcher, retaining the behavior but allowing tests
+ * to be slightly more expressive.
+ *
+ * For example:  assertThat($cheese, equalTo($smelly))
+ *          vs.  assertThat($cheese, is(equalTo($smelly)))
  */
-final class Is
+class Is extends BaseMatcher
 {
-    /**
-     * Returns true if a promise is pending.
-     *
-     * @deprecated Is::pending() will be removed in guzzlehttp/promises:4.0. Use
-     *             State::isPending() instead.
-     */
-    public static function pending(PromiseInterface $promise): bool
-    {
-        \trigger_deprecation(
-            'guzzlehttp/promises',
-            '2.6',
-            '%s() is deprecated and will be removed in 4.0. Use %s::isPending() instead.',
-            __METHOD__,
-            State::class
-        );
 
-        return State::isPending($promise);
+    private Matcher $_matcher;
+
+    public function __construct(Matcher $matcher)
+    {
+        $this->_matcher = $matcher;
+    }
+
+    public function matches($arg): bool
+    {
+        return $this->_matcher->matches($arg);
+    }
+
+    public function describeTo(Description $description): void
+    {
+        $description->appendText('is ')->appendDescriptionOf($this->_matcher);
+    }
+
+    public function describeMismatch($item, Description $mismatchDescription): void
+    {
+        $this->_matcher->describeMismatch($item, $mismatchDescription);
     }
 
     /**
-     * Returns true if a promise is fulfilled or rejected.
+     * Decorates another Matcher, retaining the behavior but allowing tests
+     * to be slightly more expressive.
      *
-     * @deprecated Is::settled() will be removed in guzzlehttp/promises:4.0. Use
-     *             State::isSettled() instead.
-     */
-    public static function settled(PromiseInterface $promise): bool
-    {
-        \trigger_deprecation(
-            'guzzlehttp/promises',
-            '2.6',
-            '%s() is deprecated and will be removed in 4.0. Use %s::isSettled() instead.',
-            __METHOD__,
-            State::class
-        );
-
-        return State::isSettled($promise);
-    }
-
-    /**
-     * Returns true if a promise is fulfilled.
+     * For example:  assertThat($cheese, equalTo($smelly))
+     *          vs.  assertThat($cheese, is(equalTo($smelly)))
      *
-     * @deprecated Is::fulfilled() will be removed in guzzlehttp/promises:4.0.
-     *             Use State::isFulfilled() instead.
+     * @factory
+     * @param mixed $value
      */
-    public static function fulfilled(PromiseInterface $promise): bool
+    public static function is($value): self
     {
-        \trigger_deprecation(
-            'guzzlehttp/promises',
-            '2.6',
-            '%s() is deprecated and will be removed in 4.0. Use %s::isFulfilled() instead.',
-            __METHOD__,
-            State::class
-        );
-
-        return State::isFulfilled($promise);
-    }
-
-    /**
-     * Returns true if a promise is rejected.
-     *
-     * @deprecated Is::rejected() will be removed in guzzlehttp/promises:4.0.
-     *             Use State::isRejected() instead.
-     */
-    public static function rejected(PromiseInterface $promise): bool
-    {
-        \trigger_deprecation(
-            'guzzlehttp/promises',
-            '2.6',
-            '%s() is deprecated and will be removed in 4.0. Use %s::isRejected() instead.',
-            __METHOD__,
-            State::class
-        );
-
-        return State::isRejected($promise);
+        return new self(Util::wrapValueWithIsEqual($value));
     }
 }
