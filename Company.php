@@ -1,13 +1,15 @@
 <?php
 
-namespace Faker\Provider\fr_BE;
+namespace Faker\Provider\lt_LT;
 
-class Company extends \Faker\Provider\fr_FR\Company
+class Company extends \Faker\Provider\Company
 {
     protected static $formats = [
-        '{{lastName}} {{companySuffix}}',
-        '{{lastName}}',
+        '{{companySuffix}} {{lastNameMale}}',
+        '{{companySuffix}} {{lastNameMale}} ir {{lastNameMale}}',
+        '{{companySuffix}} "{{lastNameMale}} ir {{lastNameMale}}"',
+        '{{companySuffix}} "{{lastNameMale}}"',
     ];
 
-    protected static $companySuffix = ['ASBL', 'SCS', 'SNC', 'SPRL', 'Associations', 'Entreprise individuelle', 'GEIE', 'GIE', 'SA', 'SCA', 'SCRI', 'SCRL'];
+    protected static $companySuffix = ['UAB', 'AB', 'IĮ', 'MB', 'VŠĮ'];
 }
