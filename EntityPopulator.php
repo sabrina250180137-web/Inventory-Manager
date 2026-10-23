@@ -1,32 +1,63 @@
 <?php
 
-namespace Faker\ORM\Propel;
+namespace Faker\ORM\Spot;
 
-use Faker\Provider\Base;
+use Faker\Generator;
+use Faker\Guesser\Name;
+use Spot\Locator;
+use Spot\Mapper;
+use Spot\Relation\BelongsTo;
 
 /**
- * Service class for populating a table through a Propel ActiveRecord class.
+ * Service class for populating a table through a Spot Entity class.
  */
 class EntityPopulator
 {
-    protected $class;
+    /**
+     * When fetching existing data - fetch only few first rows.
+     */
+    public const RELATED_FETCH_COUNT = 10;
+
+    /**
+     * @var Mapper
+     */
+    protected $mapper;
+
+    /**
+     * @var Locator
+     */
+    protected $locator;
+
+    /**
+     * @var array
+     */
     protected $columnFormatters = [];
+    /**
+     * @var array
+     */
     protected $modifiers = [];
 
     /**
-     * @param string $class A Propel ActiveRecord classname
+     * @var bool
      */
-    public function __construct($class)
+    protected $useExistingData = false;
+
+    /**
+     * @param bool $useExistingData
+     */
+    public function __construct(Mapper $mapper, Locator $locator, $useExistingData = false)
     {
-        $this->class = $class;
+        $this->mapper = $mapper;
+        $this->locator = $locator;
+        $this->useExistingData = $useExistingData;
     }
 
     /**
      * @return string
      */
-    public function getClass()
+    public function getMapper()
     {
-        return $this->class;
+        return $this->mapper;
     }
 
     public function setColumnFormatters($columnFormatters)
@@ -47,86 +78,7 @@ class EntityPopulator
         $this->columnFormatters = array_merge($this->columnFormatters, $columnFormatters);
     }
 
-    /**
-     * @return array
-     */
-    public function guessColumnFormatters(\Faker\Generator $generator)
-    {
-        $formatters = [];
-        $class = $this->class;
-        $peerClass = $class::PEER;
-        $tableMap = $peerClass::getTableMap();
-        $nameGuesser = new \Faker\Guesser\Name($generator);
-        $columnTypeGuesser = new \Faker\ORM\Propel\ColumnTypeGuesser($generator);
-
-        foreach ($tableMap->getColumns() as $columnMap) {
-            // skip behavior columns, handled by modifiers
-            if ($this->isColumnBehavior($columnMap)) {
-                continue;
-            }
-
-            if ($columnMap->isForeignKey()) {
-                $relatedClass = $columnMap->getRelation()->getForeignTable()->getClassname();
-                $formatters[$columnMap->getPhpName()] = static function ($inserted) use ($relatedClass, $generator) {
-                    return isset($inserted[$relatedClass]) ? $generator->randomElement($inserted[$relatedClass]) : null;
-                };
-
-                continue;
-            }
-
-            if ($columnMap->isPrimaryKey()) {
-                continue;
-            }
-
-            if ($formatter = $nameGuesser->guessFormat($columnMap->getPhpName(), $columnMap->getSize())) {
-                $formatters[$columnMap->getPhpName()] = $formatter;
-
-                continue;
-            }
-
-            if ($formatter = $columnTypeGuesser->guessFormat($columnMap)) {
-                $formatters[$columnMap->getPhpName()] = $formatter;
-
-                continue;
-            }
-        }
-
-        return $formatters;
-    }
-
-    /**
-     * @return bool
-     */
-    protected function isColumnBehavior(\ColumnMap $columnMap)
-    {
-        foreach ($columnMap->getTable()->getBehaviors() as $name => $params) {
-            $columnName = Base::toLower($columnMap->getName());
-
-            switch ($name) {
-                case 'nested_set':
-                    $columnNames = [$params['left_column'], $params['right_column'], $params['level_column']];
-
-                    if (in_array($columnName, $columnNames, false)) {
-                        return true;
-                    }
-
-                    break;
-
-                case 'timestampable':
-                    $columnNames = [$params['create_column'], $params['update_column']];
-
-                    if (in_array($columnName, $columnNames, false)) {
-                        return true;
-                    }
-
-                    break;
-            }
-        }
-
-        return false;
-    }
-
-    public function setModifiers($modifiers)
+    public function setModifiers(array $modifiers)
     {
         $this->modifiers = $modifiers;
     }
@@ -139,7 +91,7 @@ class EntityPopulator
         return $this->modifiers;
     }
 
-    public function mergeModifiersWith($modifiers)
+    public function mergeModifiersWith(array $modifiers)
     {
         $this->modifiers = array_merge($this->modifiers, $modifiers);
     }
@@ -147,58 +99,101 @@ class EntityPopulator
     /**
      * @return array
      */
-    public function guessModifiers(\Faker\Generator $generator)
+    public function guessColumnFormatters(Generator $generator)
     {
-        $modifiers = [];
-        $class = $this->class;
-        $peerClass = $class::PEER;
-        $tableMap = $peerClass::getTableMap();
+        $formatters = [];
+        $nameGuesser = new Name($generator);
+        $columnTypeGuesser = new ColumnTypeGuesser($generator);
+        $fields = $this->mapper->fields();
 
-        foreach ($tableMap->getBehaviors() as $name => $params) {
-            switch ($name) {
-                case 'nested_set':
-                    $modifiers['nested_set'] = static function ($obj, $inserted) use ($class, $generator): void {
-                        if (isset($inserted[$class])) {
-                            $queryClass = $class . 'Query';
-                            $parent = $queryClass::create()->findPk($generator->randomElement($inserted[$class]));
-                            $obj->insertAsLastChildOf($parent);
-                        } else {
-                            $obj->makeRoot();
+        foreach ($fields as $fieldName => $field) {
+            if ($field['primary'] === true) {
+                continue;
+            }
+
+            if ($formatter = $nameGuesser->guessFormat($fieldName)) {
+                $formatters[$fieldName] = $formatter;
+
+                continue;
+            }
+
+            if ($formatter = $columnTypeGuesser->guessFormat($field)) {
+                $formatters[$fieldName] = $formatter;
+
+                continue;
+            }
+        }
+        $entityName = $this->mapper->entity();
+        $entity = $this->mapper->build([]);
+        $relations = $entityName::relations($this->mapper, $entity);
+
+        foreach ($relations as $relation) {
+            // We don't need any other relation here.
+            if ($relation instanceof BelongsTo) {
+                $fieldName = $relation->localKey();
+                $entityName = $relation->entityName();
+                $field = $fields[$fieldName];
+                $required = $field['required'];
+
+                $locator = $this->locator;
+
+                $formatters[$fieldName] = function ($inserted) use ($required, $entityName, $locator, $generator) {
+                    if (!empty($inserted[$entityName])) {
+                        return $generator->randomElement($inserted[$entityName])->get('id');
+                    }
+
+                    if ($required && $this->useExistingData) {
+                        // We did not add anything like this, but it's required,
+                        // So let's find something existing in DB.
+                        $mapper = $locator->mapper($entityName);
+                        $records = $mapper->all()->limit(self::RELATED_FETCH_COUNT)->toArray();
+
+                        if (empty($records)) {
+                            return null;
                         }
-                    };
 
-                    break;
+                        return $generator->randomElement($records)['id'];
+                    }
 
-                case 'sortable':
-                    $modifiers['sortable'] = static function ($obj, $inserted) use ($class, $generator): void {
-                        $obj->insertAtRank($generator->numberBetween(1, count($inserted[$class] ?? []) + 1));
-                    };
-
-                    break;
+                    return null;
+                };
             }
         }
 
-        return $modifiers;
+        return $formatters;
     }
 
     /**
      * Insert one new record using the Entity class.
+     *
+     * @return string
      */
-    public function execute($con, $insertedEntities)
+    public function execute($insertedEntities)
     {
-        $obj = new $this->class();
+        $obj = $this->mapper->build([]);
 
-        foreach ($this->getColumnFormatters() as $column => $format) {
+        $this->fillColumns($obj, $insertedEntities);
+        $this->callMethods($obj, $insertedEntities);
+
+        $this->mapper->insert($obj);
+
+        return $obj;
+    }
+
+    private function fillColumns($obj, $insertedEntities): void
+    {
+        foreach ($this->columnFormatters as $field => $format) {
             if (null !== $format) {
-                $obj->setByName($column, is_callable($format) ? $format($insertedEntities, $obj) : $format);
+                $value = is_callable($format) ? $format($insertedEntities, $obj) : $format;
+                $obj->set($field, $value);
             }
         }
+    }
 
+    private function callMethods($obj, $insertedEntities): void
+    {
         foreach ($this->getModifiers() as $modifier) {
             $modifier($obj, $insertedEntities);
         }
-        $obj->save($con);
-
-        return $obj->getPrimaryKey();
     }
 }
