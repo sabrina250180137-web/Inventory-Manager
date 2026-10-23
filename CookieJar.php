@@ -1,378 +1,242 @@
 <?php
 
-namespace GuzzleHttp\Cookie;
+namespace Illuminate\Cookie;
 
-use GuzzleHttp\Psr7;
-use Psr\Http\Message\RequestInterface;
-use Psr\Http\Message\ResponseInterface;
+use Illuminate\Contracts\Cookie\QueueingFactory as JarContract;
+use Illuminate\Support\Arr;
+use Illuminate\Support\InteractsWithTime;
+use Illuminate\Support\Traits\Macroable;
+use Symfony\Component\HttpFoundation\Cookie;
 
-/**
- * Cookie jar that stores cookies as an array
- */
-class CookieJar implements CookieJarInterface
+class CookieJar implements JarContract
 {
-    private const MAX_SET_COOKIE_FIELD_LENGTH = 8190;
-    private const MAX_SET_COOKIE_FIELDS = 50;
-    private const MAX_REQUEST_COOKIES = 150;
-    private const MAX_COOKIE_HEADER_LENGTH = 8190;
+    use InteractsWithTime, Macroable;
 
     /**
-     * @var SetCookie[] Loaded cookie data
-     */
-    private $cookies = [];
-
-    /**
-     * @var bool
-     */
-    private $strictMode;
-
-    /**
-     * @param bool  $strictMode  Set to true to throw exceptions when invalid
-     *                           cookies are added to the cookie jar.
-     * @param array $cookieArray Array of SetCookie objects or a hash of
-     *                           arrays that can be used with the SetCookie
-     *                           constructor
-     */
-    public function __construct(bool $strictMode = false, array $cookieArray = [])
-    {
-        $this->strictMode = $strictMode;
-
-        foreach ($cookieArray as $cookie) {
-            if (!$cookie instanceof SetCookie) {
-                $cookie = new SetCookie($cookie);
-            }
-            $this->setCookie($cookie);
-        }
-    }
-
-    /**
-     * Create a new Cookie jar from an associative array and domain.
+     * The default path (if specified).
      *
-     * @param array  $cookies Cookies to create the jar from
-     * @param string $domain  Domain to set the cookies to
+     * @var string
      */
-    public static function fromArray(array $cookies, string $domain): self
-    {
-        $cookieJar = new self();
-        foreach ($cookies as $name => $value) {
-            $cookieJar->setCookie(new SetCookie([
-                'Domain' => $domain,
-                'Name' => $name,
-                'Value' => $value,
-                'Discard' => true,
-            ]));
-        }
+    protected $path = '/';
 
-        return $cookieJar;
+    /**
+     * The default domain (if specified).
+     *
+     * @var string
+     */
+    protected $domain;
+
+    /**
+     * The default secure setting (defaults to null).
+     *
+     * @var bool|null
+     */
+    protected $secure;
+
+    /**
+     * The default SameSite option (defaults to lax).
+     *
+     * @var string
+     */
+    protected $sameSite = 'lax';
+
+    /**
+     * All of the cookies queued for sending.
+     *
+     * @var \Symfony\Component\HttpFoundation\Cookie[]
+     */
+    protected $queued = [];
+
+    /**
+     * Create a new cookie instance.
+     *
+     * @param  string  $name
+     * @param  string  $value
+     * @param  int  $minutes
+     * @param  string|null  $path
+     * @param  string|null  $domain
+     * @param  bool|null  $secure
+     * @param  bool  $httpOnly
+     * @param  bool  $raw
+     * @param  string|null  $sameSite
+     * @return \Symfony\Component\HttpFoundation\Cookie
+     */
+    public function make($name, $value, $minutes = 0, $path = null, $domain = null, $secure = null, $httpOnly = true, $raw = false, $sameSite = null)
+    {
+        [$path, $domain, $secure, $sameSite] = $this->getPathAndDomain($path, $domain, $secure, $sameSite);
+
+        $time = ($minutes == 0) ? 0 : $this->availableAt($minutes * 60);
+
+        return new Cookie($name, $value, $time, $path, $domain, $secure, $httpOnly, $raw, $sameSite);
     }
 
     /**
-     * Evaluate if this cookie should be persisted to storage
-     * that survives between requests.
+     * Create a cookie that lasts "forever" (five years).
      *
-     * @param SetCookie $cookie              Being evaluated.
-     * @param bool      $allowSessionCookies If we should persist session cookies
+     * @param  string  $name
+     * @param  string  $value
+     * @param  string|null  $path
+     * @param  string|null  $domain
+     * @param  bool|null  $secure
+     * @param  bool  $httpOnly
+     * @param  bool  $raw
+     * @param  string|null  $sameSite
+     * @return \Symfony\Component\HttpFoundation\Cookie
      */
-    public static function shouldPersist(SetCookie $cookie, bool $allowSessionCookies = false): bool
+    public function forever($name, $value, $path = null, $domain = null, $secure = null, $httpOnly = true, $raw = false, $sameSite = null)
     {
-        if ($cookie->getExpires() || $allowSessionCookies) {
-            if (!$cookie->getDiscard()) {
-                return true;
-            }
-        }
-
-        return false;
+        return $this->make($name, $value, 2628000, $path, $domain, $secure, $httpOnly, $raw, $sameSite);
     }
 
     /**
-     * Finds and returns the cookie based on the name
+     * Expire the given cookie.
      *
-     * @param string $name cookie name to search for
-     *
-     * @return SetCookie|null cookie that was found or null if not found
+     * @param  string  $name
+     * @param  string|null  $path
+     * @param  string|null  $domain
+     * @return \Symfony\Component\HttpFoundation\Cookie
      */
-    public function getCookieByName(string $name): ?SetCookie
+    public function forget($name, $path = null, $domain = null)
     {
-        foreach ($this->cookies as $cookie) {
-            if ($cookie->getName() !== null && Psr7\Utils::caselessEquals($cookie->getName(), $name)) {
-                return $cookie;
-            }
+        return $this->make($name, null, -2628000, $path, $domain);
+    }
+
+    /**
+     * Determine if a cookie has been queued.
+     *
+     * @param  string  $key
+     * @param  string|null  $path
+     * @return bool
+     */
+    public function hasQueued($key, $path = null)
+    {
+        return ! is_null($this->queued($key, null, $path));
+    }
+
+    /**
+     * Get a queued cookie instance.
+     *
+     * @param  string  $key
+     * @param  mixed  $default
+     * @param  string|null  $path
+     * @return \Symfony\Component\HttpFoundation\Cookie|null
+     */
+    public function queued($key, $default = null, $path = null)
+    {
+        $queued = Arr::get($this->queued, $key, $default);
+
+        if ($path === null) {
+            return Arr::last($queued, null, $default);
         }
 
-        return null;
+        return Arr::get($queued, $path, $default);
     }
 
-    public function toArray(): array
+    /**
+     * Queue a cookie to send with the next response.
+     *
+     * @param  array  $parameters
+     * @return void
+     */
+    public function queue(...$parameters)
     {
-        return \array_map(static function (SetCookie $cookie): array {
-            return $cookie->toArray();
-        }, $this->getIterator()->getArrayCopy());
+        if (isset($parameters[0]) && $parameters[0] instanceof Cookie) {
+            $cookie = $parameters[0];
+        } else {
+            $cookie = $this->make(...array_values($parameters));
+        }
+
+        if (! isset($this->queued[$cookie->getName()])) {
+            $this->queued[$cookie->getName()] = [];
+        }
+
+        $this->queued[$cookie->getName()][$cookie->getPath()] = $cookie;
     }
 
-    public function clear(?string $domain = null, ?string $path = null, ?string $name = null): void
+    /**
+     * Queue a cookie to expire with the next response.
+     *
+     * @param  string  $name
+     * @param  string|null  $path
+     * @param  string|null  $domain
+     * @return void
+     */
+    public function expire($name, $path = null, $domain = null)
     {
-        if ($domain === null) {
-            $this->cookies = [];
+        $this->queue($this->forget($name, $path, $domain));
+    }
+
+    /**
+     * Remove a cookie from the queue.
+     *
+     * @param  string  $name
+     * @param  string|null  $path
+     * @return void
+     */
+    public function unqueue($name, $path = null)
+    {
+        if ($path === null) {
+            unset($this->queued[$name]);
 
             return;
-        } elseif ($path === null) {
-            $this->cookies = \array_filter(
-                $this->cookies,
-                static function (SetCookie $cookie) use ($domain): bool {
-                    return $cookie->getDomain() === null || !$cookie->matchesDomain($domain);
-                }
-            );
-        } elseif ($name === null) {
-            $this->cookies = \array_filter(
-                $this->cookies,
-                static function (SetCookie $cookie) use ($path, $domain): bool {
-                    return !($cookie->getDomain() !== null
-                        && $cookie->matchesPath($path)
-                        && $cookie->matchesDomain($domain));
-                }
-            );
-        } else {
-            $this->cookies = \array_filter(
-                $this->cookies,
-                static function (SetCookie $cookie) use ($path, $domain, $name) {
-                    return !($cookie->getDomain() !== null
-                        && $cookie->getName() === $name
-                        && $cookie->matchesPath($path)
-                        && $cookie->matchesDomain($domain));
-                }
-            );
-        }
-    }
-
-    public function clearSessionCookies(): void
-    {
-        $this->cookies = \array_filter(
-            $this->cookies,
-            static function (SetCookie $cookie): bool {
-                return !$cookie->getDiscard() && $cookie->getExpires();
-            }
-        );
-    }
-
-    public function setCookie(SetCookie $cookie): bool
-    {
-        // If the name string is empty (but not 0), ignore the set-cookie
-        // string entirely.
-        $name = $cookie->getName();
-        if (!$name && $name !== '0') {
-            return false;
         }
 
-        // Only allow cookies with set and valid domain, name, value
-        $result = $cookie->validate();
-        if ($result !== true) {
-            if ($this->strictMode) {
-                throw new \RuntimeException('Invalid cookie: '.$result);
-            }
-            $this->removeCookieIfEmpty($cookie);
+        unset($this->queued[$name][$path]);
 
-            return false;
-        }
-
-        $maxAge = $cookie->getMaxAge();
-        if ($maxAge !== null && $maxAge <= 0) {
-            if ($cookie->getDomain() !== null) {
-                $this->removeCookie($cookie);
-            }
-
-            return false;
-        }
-
-        // Resolve conflicts with previously set cookies
-        foreach ($this->cookies as $i => $c) {
-            // Two cookies are identical, when their path, and domain are
-            // identical.
-            if ($c->getPath() !== $cookie->getPath()
-                || $c->getDomain() !== $cookie->getDomain()
-                || $c->getHostOnly() !== $cookie->getHostOnly()
-                || $c->getName() !== $cookie->getName()
-            ) {
-                continue;
-            }
-
-            // The previously set cookie is a discard cookie and this one is
-            // not so allow the new cookie to be set
-            if (!$cookie->getDiscard() && $c->getDiscard()) {
-                unset($this->cookies[$i]);
-                continue;
-            }
-
-            // If the new cookie's expiration is further into the future, then
-            // replace the old cookie
-            if ($cookie->getExpires() > $c->getExpires()) {
-                unset($this->cookies[$i]);
-                continue;
-            }
-
-            // If the value has changed, we better change it
-            if ($cookie->getValue() !== $c->getValue()) {
-                unset($this->cookies[$i]);
-                continue;
-            }
-
-            // The cookie exists, so no need to continue
-            return false;
-        }
-
-        $this->cookies[] = $cookie;
-
-        return true;
-    }
-
-    public function count(): int
-    {
-        return \count($this->cookies);
-    }
-
-    /**
-     * @return \ArrayIterator<int, SetCookie>
-     */
-    public function getIterator(): \ArrayIterator
-    {
-        return new \ArrayIterator(\array_values($this->cookies));
-    }
-
-    public function extractCookies(RequestInterface $request, ResponseInterface $response): void
-    {
-        if ($cookieHeader = $response->getHeader('Set-Cookie')) {
-            $accepted = 0;
-            foreach ($cookieHeader as $cookie) {
-                if (\strlen($cookie) > self::MAX_SET_COOKIE_FIELD_LENGTH) {
-                    continue;
-                }
-
-                $sc = SetCookie::fromString($cookie);
-                $domain = $sc->getDomain();
-                if ($domain === null || $domain === '') {
-                    $sc->setDomain($request->getUri()->getHost());
-                    $sc->setHostOnly(true);
-                } elseif (\substr($domain, -1) === '.' && '' !== \trim($domain, '.')) {
-                    // Keep pure-dot domains rejected by the dot-only fix.
-                    $sc->setDomain($request->getUri()->getHost());
-                    $sc->setHostOnly(true);
-                } else {
-                    $sc->setHostOnly(false);
-                }
-                if (0 !== \strpos($sc->getPath(), '/')) {
-                    $sc->setPath($this->getCookiePathFromRequest($request));
-                }
-                if (!$sc->matchesDomain($request->getUri()->getHost())) {
-                    continue;
-                }
-                // Note: At this point `$sc->getDomain()` being a public suffix should
-                // be rejected, but we don't want to pull in the full PSL dependency.
-                if ($this->setCookie($sc) && ++$accepted === self::MAX_SET_COOKIE_FIELDS) {
-                    break;
-                }
-            }
+        if (empty($this->queued[$name])) {
+            unset($this->queued[$name]);
         }
     }
 
     /**
-     * Computes cookie path following RFC 6265 section 5.1.4
+     * Get the path and domain, or the default values.
      *
-     * @see https://datatracker.ietf.org/doc/html/rfc6265#section-5.1.4
+     * @param  string  $path
+     * @param  string  $domain
+     * @param  bool|null  $secure
+     * @param  string|null  $sameSite
+     * @return array
      */
-    private function getCookiePathFromRequest(RequestInterface $request): string
+    protected function getPathAndDomain($path, $domain, $secure = null, $sameSite = null)
     {
-        $uriPath = $request->getUri()->getPath();
-        if ('' === $uriPath) {
-            return '/';
-        }
-        if (0 !== \strpos($uriPath, '/')) {
-            return '/';
-        }
-        if ('/' === $uriPath) {
-            return '/';
-        }
-        $lastSlashPos = \strrpos($uriPath, '/');
-        if (0 === $lastSlashPos || false === $lastSlashPos) {
-            return '/';
-        }
-
-        return \substr($uriPath, 0, $lastSlashPos);
-    }
-
-    public function withCookieHeader(RequestInterface $request): RequestInterface
-    {
-        $values = [];
-        $headerLength = 8;
-        $uri = $request->getUri();
-        $scheme = $uri->getScheme();
-        $host = $uri->getHost();
-        $path = $uri->getPath() ?: '/';
-
-        foreach ($this->cookies as $cookie) {
-            if ($cookie->getDomain() !== null
-                && $cookie->matchesPath($path)
-                && $cookie->matchesDomain($host)
-                && !$cookie->isExpired()
-                && (!$cookie->getSecure() || $scheme === 'https')
-            ) {
-                $name = (string) $cookie->getName();
-                $value = (string) $cookie->getValue();
-                $separatorLength = $values === [] ? 0 : 2;
-                $valueLength = \strlen($name) + 1 + \strlen($value);
-                if ($headerLength + $separatorLength + $valueLength > self::MAX_COOKIE_HEADER_LENGTH) {
-                    break;
-                }
-
-                $values[] = $name.'='.$value;
-                $headerLength += $separatorLength + $valueLength;
-                if (\count($values) === self::MAX_REQUEST_COOKIES) {
-                    break;
-                }
-            }
-        }
-
-        return $values
-            ? $request->withHeader('Cookie', \implode('; ', $values))
-            : $request;
+        return [$path ?: $this->path, $domain ?: $this->domain, is_bool($secure) ? $secure : $this->secure, $sameSite ?: $this->sameSite];
     }
 
     /**
-     * If a cookie already exists and the server asks to set it again with a
-     * null value, the cookie must be deleted.
+     * Set the default path and domain for the jar.
+     *
+     * @param  string  $path
+     * @param  string  $domain
+     * @param  bool  $secure
+     * @param  string|null  $sameSite
+     * @return $this
      */
-    private function removeCookieIfEmpty(SetCookie $cookie): void
+    public function setDefaultPathAndDomain($path, $domain, $secure = false, $sameSite = null)
     {
-        $cookieValue = $cookie->getValue();
-        if (($cookieValue === null || $cookieValue === '') && $cookie->getDomain() !== null) {
-            $this->removeCookie($cookie);
-        }
+        [$this->path, $this->domain, $this->secure, $this->sameSite] = [$path, $domain, $secure, $sameSite];
+
+        return $this;
     }
 
-    private function removeCookie(SetCookie $cookie): void
+    /**
+     * Get the cookies which have been queued for the next request.
+     *
+     * @return \Symfony\Component\HttpFoundation\Cookie[]
+     */
+    public function getQueuedCookies()
     {
-        $this->cookies = \array_filter(
-            $this->cookies,
-            static function (SetCookie $stored) use ($cookie): bool {
-                return !($stored->getName() === $cookie->getName()
-                    && $stored->getPath() === $cookie->getPath()
-                    && self::cookieDomainsEqual($stored->getDomain(), $cookie->getDomain())
-                    && $stored->getHostOnly() === $cookie->getHostOnly());
-            }
-        );
+        return Arr::flatten($this->queued);
     }
 
-    private static function cookieDomainsEqual(?string $first, ?string $second): bool
+    /**
+     * Flush the cookies which have been queued for the next request.
+     *
+     * @return $this
+     */
+    public function flushQueuedCookies()
     {
-        if ($first === null || $second === null) {
-            return $first === $second;
-        }
+        $this->queued = [];
 
-        if (isset($first[0]) && $first[0] === '.') {
-            $first = \substr($first, 1);
-        }
-        if (isset($second[0]) && $second[0] === '.') {
-            $second = \substr($second, 1);
-        }
-
-        return Psr7\Utils::caselessEquals($first, $second);
+        return $this;
     }
 }

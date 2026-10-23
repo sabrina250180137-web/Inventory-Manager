@@ -1,64 +1,37 @@
 <?php
 
-namespace Illuminate\Contracts\Console;
+namespace Illuminate\Contracts\Http;
 
 interface Kernel
 {
     /**
-     * Bootstrap the application for artisan commands.
+     * Bootstrap the application for HTTP requests.
      *
      * @return void
      */
     public function bootstrap();
 
     /**
-     * Handle an incoming console command.
+     * Handle an incoming HTTP request.
      *
-     * @param  \Symfony\Component\Console\Input\InputInterface  $input
-     * @param  \Symfony\Component\Console\Output\OutputInterface|null  $output
-     * @return int
+     * @param  \Symfony\Component\HttpFoundation\Request  $request
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function handle($input, $output = null);
+    public function handle($request);
 
     /**
-     * Run an Artisan console command by name.
+     * Perform any final actions for the request lifecycle.
      *
-     * @param  string  $command
-     * @param  array  $parameters
-     * @param  \Symfony\Component\Console\Output\OutputInterface|null  $outputBuffer
-     * @return int
-     */
-    public function call($command, array $parameters = [], $outputBuffer = null);
-
-    /**
-     * Queue an Artisan console command by name.
-     *
-     * @param  string  $command
-     * @param  array  $parameters
-     * @return \Illuminate\Foundation\Bus\PendingDispatch
-     */
-    public function queue($command, array $parameters = []);
-
-    /**
-     * Get all of the commands registered with the console.
-     *
-     * @return array
-     */
-    public function all();
-
-    /**
-     * Get the output for the last run command.
-     *
-     * @return string
-     */
-    public function output();
-
-    /**
-     * Terminate the application.
-     *
-     * @param  \Symfony\Component\Console\Input\InputInterface  $input
-     * @param  int  $status
+     * @param  \Symfony\Component\HttpFoundation\Request  $request
+     * @param  \Symfony\Component\HttpFoundation\Response  $response
      * @return void
      */
-    public function terminate($input, $status);
+    public function terminate($request, $response);
+
+    /**
+     * Get the Laravel application instance.
+     *
+     * @return \Illuminate\Contracts\Foundation\Application
+     */
+    public function getApplication();
 }
